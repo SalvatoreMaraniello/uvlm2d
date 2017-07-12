@@ -63,7 +63,7 @@ def visualise_grid(S,figname='Geometry and grid'):
                                                      label=r'wing vortices')
     ax.plot(S.ZetaW[:,0],S.ZetaW[:,1],'k',marker='*',
                                                      label=r'wake vortices')
-    ax.plot(S.Cmat[:,0],S.Cmat[:,1],'r',marker='o',linestyle='',
+    ax.plot(S.Zeta_c[:,0],S.Zeta_c[:,1],'r',marker='o',linestyle='',
                                                 label=r'collocation points')
     ax.legend()
 

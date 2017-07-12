@@ -28,6 +28,8 @@ class solver():
 
 	def __init__(self,M,Mw,b,Uinf,alpha,rho=1.225):
 
+		Ndim=2
+
 		# input
 		self.M=M 
 		self.Mw=Mw
@@ -46,16 +48,27 @@ class solver():
 		self.K, self.Kw=M+1,Mw+1
 
 		# parameters
-		self.perc_ring=0.25  # backward shift of vortex panels wrt wing panels
+		self.perc_ring=0.25  # backward shift of vortex panels wrt physical panels
 		self.perc_coll=0.5   # collocation point shift wrt vortex ring TE
 		self.perc_interp=0.5 # interpolation of velocity shift wrt vortex ring TE
 
-		# initialise output
+		### initialise 
+
+		# wing panels coordinates
+		self.Rmat=np.zeros((self.K,Ndim))
+		# grid coordinates
+		self.Zeta=np.zeros((self.K,Ndim))
+		self.ZetaW=np.zeros((self.Kw,Ndim))
+		# collocation points and normals
+		self.Zeta_c=np.zeros((self.K-1,Ndim))
+		self.Nmat=np.zeros((self.K-1,Ndim))
+
+		# output
 		self.gamma=np.zeros((M,))
 		self.gammaW=np.zeros((Mw,))
 		self.Gamma=np.zeros((M,))
 		self.GammaW=np.zeros((Mw,))
-		self.FmatSta = np.zeros((M,2))
+		self.FmatSta = np.zeros((M,Ndim))
 
 		# settings
 		self.PROCESSORS=4
@@ -76,15 +89,6 @@ class solver():
 		Ndim=2
 		K,Kw=self.K,self.Kw
 
-		# grid coordinates
-		self.Zeta=np.zeros((K,Ndim))
-		self.ZetaW=np.zeros((Kw,Ndim))
-		# wing panels coordinates
-		self.Rmat=np.zeros((K,Ndim))
-		# collocation points and normals
-		self.Cmat=np.zeros((K-1,Ndim))
-		self.Nmat=np.zeros((K-1,Ndim))
-
 		# def wing panels coordinates
 		rLE=2.*self.b*np.array([-np.cos(self.alpha),np.sin(self.alpha)])
 		rTE=np.zeros((Ndim,))
@@ -103,16 +107,6 @@ class solver():
 		for ii in range(Ndim):
 			self.ZetaW[:,ii]=np.linspace(self.Zeta[-1,ii],EndWake[ii],Kw)
 
-		# def collocation points
-		DZeta=np.diff(self.Zeta.T).T
-		self.Cmat=self.Zeta[:K-1,:]+self.perc_coll*DZeta
-
-		# def normals such that (zeta2-zeta1)^nv=kv
-		kvers=np.array([0.,0.,1.])
-		for ii in range(K-1):
-			self.Nmat[ii,:]=\
-			    np.array([-DZeta[ii,1],DZeta[ii,0]])/np.linalg.norm(DZeta[ii,:])  
-
 		# set velocity fields
 		self.dZetadt=np.zeros((self.K,2)) # aerofoil
 		self.Wzeta=np.zeros((self.K,2))   # gust
@@ -124,25 +118,81 @@ class solver():
 		return self
 
 
+	def get_Nmat(self):
+		'''
+		Derive normals at collocation points
+		'''
 
-	def get_Vcoll(self):
-		'''
-		Retrieve the velocity induced at the collocation points by:
-		- the aerofoil motion
-		- the free stream
-		'''
 		K=self.K
 
-		### velocity at collocation points
-		#Vcollref=(1.-perc)*Vzeta[:K,:]+perc*Vzeta[1:,:]
-		# Build interpolation tensor, eq.(1)
-		wvsub=np.zeros((K,))
-		wvsub[0]=1.-self.perc_interp 
-		wvsub[1]=self.perc_interp  
-		self.Wsub=(scalg.circulant( wvsub ).T)[:self.M,:]
-		self.Vcoll = np.dot(self.Wsub,self.Uzeta+self.Wzeta-self.dZetadt)
+		kvers=np.array([0.,0.,1.])
+		DZeta=np.diff(self.Zeta.T).T
+		for ii in range(K-1):
+			self.Nmat[ii,:]=np.array([-DZeta[ii,1],DZeta[ii,0]])/\
+			                                         np.linalg.norm(DZeta[ii,:])
 
-		return self.Vcoll
+
+	def get_Wmats(self):
+		'''
+		Produce weight matrices for interpolation/projection.
+
+		Note: this implementation is not efficient for dynamic analysis, as some
+		of these matrices do not require updating (self._Wcv, self._Wcv) if the
+		aerofoil moves.
+		'''
+
+		if np.max(np.abs(self.Nmat))<1e-16:
+			raise NameError('get_W,mats called before defining normals!')
+
+		Ndim=2
+		K=self.K
+
+		### interp. vortex grid to collocation points
+		wcv=np.zeros((K,))
+		wcv[0]=1.-self.perc_interp 
+		wcv[1]=self.perc_interp  
+		self._Wcv=(scalg.circulant(wcv).T)[:K-1,:]
+		
+		### interp. vortex grid to mid-segment points (formal, not required in 2D)
+		self._Wsv=np.eye(self.K)
+
+		### Project on normal velocity - 3D array
+		self._Wnc=np.zeros((Ndim,K-1,K-1))
+		for dd in range(Ndim):
+			self._Wnc[dd,:,:]=np.diag(self.Nmat[:,dd])
+
+
+	def get_Gamma_conversion_matrices(self):
+		'''
+		produces constant matrices to convert circulation Gamma into gamma and
+		vice-versa.
+		Function will produce error if M,Mw=1,1
+		'''
+
+		M,Mw=self.M,self.Mw
+
+		# Bound
+		if M>1:
+			wt=np.zeros((M,))
+			wt[0],wt[1]=1.,-1.
+			self._TgG=scalg.circulant(wt)  # Gamma to gamma
+			self._TgG[0,-1]=0.0
+		else:
+			self._TgG=np.ones((M,M))
+
+		self._TGg=scalg.inv(self._TgG) # gamma to Gamma
+
+		# Wake
+		wt=np.zeros((Mw,))
+		wt[0],wt[1]=1.,-1.
+		self._TgG_w=scalg.circulant(wt)  # Gamma to gamma
+		self._TgG_w[0,-1]=0.0
+		self._TGg_w=scalg.inv(self._TgG_w) # gamma to Gamma
+
+		# Additional term for the wake
+		self._EgG=np.zeros((Mw,M))
+		self._EgG[0,-1]=-1.0
+		self._EGg=np.dot( self._TGg_w, np.dot(self._EgG,self._TGg) )
 
 
 	def build_AIC_gamma2d(self):
@@ -163,11 +213,11 @@ class solver():
 			# bound
 			for jj in range(self.M):
 				self.A[ii,jj]=np.dot( self.Nmat[ii,:],
-					 biot_savart_2d(self.Cmat[ii,:] ,self.Zeta[jj,:],gamma=1.0))
+				   biot_savart_2d(self.Zeta_c[ii,:] ,self.Zeta[jj,:],gamma=1.0))
 			# wake
 			for jj in range(self.Mw):
 				self.AW[ii,jj]=np.dot( self.Nmat[ii,:], 
-					 biot_savart_2d(self.Cmat[ii,:],self.ZetaW[jj,:],gamma=1.0))
+				   biot_savart_2d(self.Zeta_c[ii,:],self.ZetaW[jj,:],gamma=1.0))
 
 		return self
 
@@ -187,16 +237,20 @@ class solver():
 		# allocate AIC matrices - positive contribution
 		self.build_AIC_gamma2d()
 
-		# "negative" contribution - bound
-		self.A[:,:-1]+=-self.A[:,1:]
-		# TE vortex from wake
-		self.A[:,-1]+=-self.AW[:,0]
-		# "negative" contribution - wake
-		self.AW[:,:-1]+=-self.AW[:,1:]
-		# neglect contribution of last segment of wake
-		#for ii in range(self.M):
-		#	self.AW[ii,-1]+= -np.dot( self.Nmat[ii,:],
-		#			biot_savart_2d(self.Cmat[ii,:] ,self.ZetaW[-1,:],gamma=1.0))
+		### convert:
+		# warning: bound needs to be computed first!
+		self.A=np.dot(self.A,self._TgG)+np.dot(self.AW,self._EgG)
+		self.AW=np.dot( self.AW,self._TgG_w )
+		# # "negative" contribution - bound
+		# self.A[:,:-1]+=-self.A[:,1:]
+		# # TE vortex from wake
+		# self.A[:,-1]+=-self.AW[:,0]
+		# # "negative" contribution - wake
+		# self.AW[:,:-1]+=-self.AW[:,1:]
+		# # neglect contribution of last segment of wake
+		# #for ii in range(self.M):
+		# #	self.AW[ii,-1]+= -np.dot( self.Nmat[ii,:],
+		# #			biot_savart_2d(self.Zeta_c[ii,:] ,self.ZetaW[-1,:],gamma=1.0))
 
 		return self
 
@@ -216,7 +270,7 @@ class solver():
 		# wing panels coordinates
 		self.Rmat=self.Rmat/self.b
 		# collocation points and normals
-		self.Cmat=self.Cmat/self.b
+		self.Zeta_c=self.Zeta_c/self.b
 		# set velocity fields
 		self.dZetadt=self.dZetadt/self.Uabs
 		self.Wzeta=self.Wzeta/self.Uabs
@@ -246,7 +300,7 @@ class solver():
 		# wing panels coordinates
 		self.Rmat=self.Rmat*self.b
 		# collocation points and normals
-		self.Cmat=self.Cmat*self.b
+		self.Zeta_c=self.Zeta_c*self.b
 		# set velocity fields
 		self.dZetadt=self.dZetadt*self.Uabs
 		self.Wzeta=self.Wzeta*self.Uabs
@@ -275,11 +329,22 @@ class solver():
 		# Nondimensionalise
 		self.nondimvars()
 
+		# update normals
+		self.get_Nmat()
+		# get interpolation matrices (only self._Wnc requires update)
+		self.get_Wmats()
+		# get gamma conversion constant matrices
+		self.get_Gamma_conversion_matrices()
+
+		# init collocation points
+		self.Zeta_c=np.dot(self._Wcv,self.Zeta)                                     
+
 		# get velocity at collocation points from:
 		# - free stream
 		# - aerofil motion
-		self.get_Vcoll()
-		self.Vcollperp=np.diag(np.dot(self.Nmat,self.Vcoll.T))
+		self.Vcoll=np.dot(self._Wcv,self.Uzeta+self.Wzeta-self.dZetadt)
+		self.Vcollperp=np.dot(self._Wnc[0,:,:],self.Vcoll[:,0])+\
+		                                np.dot(self._Wnc[1,:,:],self.Vcoll[:,1])
 
 		# get AIC matrices
 		self.build_AIC_gamma2d()	
@@ -288,11 +353,14 @@ class solver():
 		#gamma: vorticity at Zeta[ii,:] for ii=0:M (for Zeta[K,:] gamma=0)
 		self.gamma=np.linalg.solve(self.A,-self.Vcollperp)
 
-		# Produce Gamma
-		self.Gamma[0]=self.gamma[0]
-		for ii in range(1,M):
-			self.Gamma[ii]=self.Gamma[ii-1]+self.gamma[ii]
-		self.GammaW=self.Gamma[-1]*np.ones((Mw,))
+		### Produce Gamma
+		# self.Gamma[0]=self.gamma[0]
+		# for ii in range(1,M):
+		# 	self.Gamma[ii]=self.Gamma[ii-1]+self.gamma[ii]
+		# self.GammaW=self.Gamma[-1]*np.ones((Mw,))
+		self.Gamma=np.dot(self._TGg, self.gamma)
+		self.GammaW=np.dot(self._TGg_w, self.gammaW)-np.dot(self._EGg,self.gamma)
+
 
 		# induced velocity at grid points:
 		self.get_induced_velocity()
@@ -322,13 +390,24 @@ class solver():
 
 		# nondimensionalise
 		self.nondimvars()
+		# update normals
+		self.get_Nmat()
+		# get interpolation matrices (only self._Wnc requires update)
+		self.get_Wmats()
+		# get gamma conversion constant matrices
+		self.get_Gamma_conversion_matrices()
 
+		# init collocation points
+		self.Zeta_c=np.dot(self._Wcv,self.Zeta)     
 
 		# get velocity at collocation points from:
 		# - free stream
 		# - aerofil motion
-		self.get_Vcoll()
-		self.Vcollperp=np.diag(np.dot(self.Nmat,self.Vcoll.T))
+		self.Vcoll=np.dot(self._Wcv,self.Uzeta+self.Wzeta-self.dZetadt)
+		Vp_check=np.diag(np.dot(self.Nmat,self.Vcoll.T))
+		self.Vcollperp=np.dot(self._Wnc[0,:,:],self.Vcoll[:,0])+\
+		                                np.dot(self._Wnc[1,:,:],self.Vcoll[:,1])
+
 
 		# get AIC matrices
 		self.build_AIC_Gamma2d()	
@@ -341,14 +420,17 @@ class solver():
 		self.Gamma=np.linalg.solve(self.Asys,-self.Vcollperp)
 		self.GammaW=self.Gamma[-1]*np.ones((Mw,))
 
-		# Produce gamma
-		self.gamma[0]=self.Gamma[0]
-		for ii in range(1,M):
-			self.gamma[ii]=self.Gamma[ii]-self.Gamma[ii-1]
-		self.gammaW[0]=self.GammaW[0]-self.Gamma[-1]
-		for ii in range(1,Mw):
-			self.gammaW[ii]=self.GammaW[ii]-self.GammaW[ii-1]
 
+
+		### Produce gamma
+		# self.gamma[0]=self.Gamma[0]
+		# for ii in range(1,M):
+		# 	self.gamma[ii]=self.Gamma[ii]-self.Gamma[ii-1]
+		# self.gammaW[0]=self.GammaW[0]-self.Gamma[-1]
+		# for ii in range(1,Mw):
+		# 	self.gammaW[ii]=self.GammaW[ii]-self.GammaW[ii-1]
+		self.gamma=np.dot(self._TgG,self.Gamma)
+		self.gammaW=np.dot(self._TgG_w,self.GammaW)+np.dot(self._EgG,self.Gamma)
 
 		# induced velocity at grid points:
 		#self.get_induced_velocity()
@@ -461,8 +543,6 @@ class solver():
 		#pool.join() 
             
 
-
-
 	def analytical(self):
 		'''
 		Analytical solution for circulation along a flat plate. The solution 
@@ -512,8 +592,8 @@ if __name__=='__main__':
 
 	# input
 	chord=2.
-	ainf=20.*np.pi/180.
-	S=solver(M=20,Mw=20*20,b=0.5*chord,
+	ainf=0.*np.pi/180.
+	S=solver(M=20,Mw=400,b=0.5*chord,
 		     Uinf=10.*np.array([np.cos(ainf),np.sin(ainf)]),
 		     alpha=10.*np.pi/180.,
 		     rho=1.225)
@@ -540,6 +620,8 @@ if __name__=='__main__':
 	ax2,fig2=pp.force_distr(S)
 	plt.show()
 	plt.close('all')
+
+
 
 	# Aero forces
 	Ftot=S.FmatSta.sum(0)

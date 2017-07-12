@@ -251,6 +251,11 @@ class solver(uvlm2d_sta.solver):
 		else:
 			# nondimensionalise
 			self.nondimvars()
+			# get relevant matrices
+			self.get_Nmat()
+			self.get_Wmats()
+			self.get_Gamma_conversion_matrices()
+			# get AIC matrices
 			self.build_AIC_Gamma2d()
 			
 		# LU factorisation
@@ -274,15 +279,12 @@ class solver(uvlm2d_sta.solver):
 			### update aerofoil geometry
 			# coordinates
 			self.Zeta=self.THZeta[tt,:,:]
-			# collocation points
-			DZeta=np.diff(self.Zeta.T).T
-			self.Cmat=self.Zeta[:K-1,:]+self.perc_coll*DZeta
 			# normals
-			kvers=np.array([0.,0.,1.])
-			for ii in range(K-1):
-				self.Nmat[ii,:]=\
-				    np.array([-DZeta[ii,1],DZeta[ii,0]])/np.linalg.norm(
-				    	                                            DZeta[ii,:])  
+			self.get_Nmat()
+			# weight matrices (onlse self._Wnc changes)
+			self.get_Wmats()
+			# collocation points
+			self.Zeta_c=np.dot(self._Wcv,self.Zeta)			
 
 			### update wake geometry
 			for dd in range(Ndim):
@@ -300,8 +302,9 @@ class solver(uvlm2d_sta.solver):
 
 			### solve
 			# velocity at collocation points
-			self.get_Vcoll()
-			self.Vcollperp=np.diag(np.dot(self.Nmat,self.Vcoll.T))
+			self.Vcoll=np.dot(self._Wcv,self.Uzeta+self.Wzeta-self.dZetadt)
+			self.Vcollperp=np.dot(self._Wnc[0,:,:],self.Vcoll[:,0])+\
+		                                np.dot(self._Wnc[1,:,:],self.Vcoll[:,1])
 
 			# Propagate wake vorticity
 			self.GammaW=np.dot(Cgamma,self.Gamma)+np.dot(CgammaW,self.GammaW)
@@ -360,12 +363,7 @@ class solver(uvlm2d_sta.solver):
 				Fjouk[nn,:]=-self.gamma[nn]*\
 				          np.array([-self.Vtot_zeta[nn,1],self.Vtot_zeta[nn,0]])
 			# dynamic - added mass - collocation points
-			# total velocity at collocaiton points (interpolate)
-			# Wsub computed into get_coll()
-			#self.Vtot_coll=np.dot(self.Wsub,self.Vtot_zeta)
-			# added mass force
 			DZeta=np.diff(self.Zeta.T).T
-
 			for nn in range(M):
 				Fmass[nn,:]=-np.linalg.norm(DZeta[nn,:])*\
 				    (self.Gamma[nn]-self.THGamma[tt-1,nn])/self.dt*\
@@ -439,6 +437,11 @@ class solver(uvlm2d_sta.solver):
 		else:
 			# nondimensionalise
 			self.nondimvars()
+			# get relevant matrices
+			self.get_Nmat()
+			self.get_Wmats()
+			self.get_Gamma_conversion_matrices()
+			# build AIC
 			self.build_AIC_Gamma2d()
 
 		# LU factorisation
@@ -452,34 +455,30 @@ class solver(uvlm2d_sta.solver):
 		self.THFaero[0,:]=self.FmatSta.sum(0)		
 
 
-		##### Things not required in time-loop
-
 		# collocation points
-		DZeta=np.diff(self.Zeta.T).T
-		self.Cmat=self.Zeta[:K-1,:]+self.perc_coll*DZeta
-
-		# normals
-		kvers=np.array([0.,0.,1.])
-		for ii in range(K-1):
-			self.Nmat[ii,:]=\
-			    np.array([-DZeta[ii,1],DZeta[ii,0]])/np.linalg.norm(DZeta[ii,:])
+		self.Zeta_c=np.dot(self._Wcv,self.Zeta)
 
 		for tt in range(1,NT):
+
 
 			##### useless stuff kept for post-processing
 			### update aerofoil geometry
 			if self._savewake:
 				self.THZetaW[tt,:,:]=self.ZetaW
 
-			### update velocities
+			### update gird position/velocities
+			self.Zeta=self.THZeta[tt,:,:]
 			self.Wzeta=self.THWzeta[tt,:,:]
 			self.dZetadt=(self.THZeta[tt,:,:]-self.THZeta[tt-1,:,:])/self.dt
 
-			### solve
-			# velocity at collocation points
-			self.get_Vcoll()
-			self.Vcollperp=np.diag(np.dot(self.Nmat,self.Vcoll.T))
 
+			# velocity at collocation points
+			self.Vcoll=np.dot(self._Wcv,self.Uzeta+self.Wzeta-self.dZetadt)
+			self.Vcollperp=np.dot(self._Wnc[0,:,:],self.Vcoll[:,0])+\
+		                                np.dot(self._Wnc[1,:,:],self.Vcoll[:,1])
+
+
+			### solve
 			# Propagate wake vorticity
 			self.GammaW=np.dot(Cgamma,self.Gamma)+np.dot(CgammaW,self.GammaW)
 
@@ -508,13 +507,8 @@ class solver(uvlm2d_sta.solver):
 				Fjouk[nn,:]=-self.gamma[nn]*\
 				          np.array([-self.Vtot_zeta[nn,1],self.Vtot_zeta[nn,0]])
 
-			# dynamic - added mass - collocation points
-			# total velocity at collocaiton points (interpolate)
-			# Wsub computed into get_coll()
-			#self.Vtot_coll=np.dot(self.Wsub,self.Vtot_zeta)
+
 			# added mass force
-
-
 			for nn in range(M):
 				Fmass[nn,:]=-np.linalg.norm(DZeta[nn,:])*\
 				    (self.Gamma[nn]-self.THGamma[tt-1,nn])/self.dt*\
