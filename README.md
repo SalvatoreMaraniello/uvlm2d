@@ -18,3 +18,9 @@
 
 # Run:
 - see ./test/valid*.ipynb or ./test/test_dyn.py
+
+
+# Versions summary
+- v0.0: static/dynamic solutions with prescribed wake working. Version not available in git.
+- v1.0: nondimensional static/dynamic solutions with prescribed wake working.
+- v2.0: (in progress) solutions with vectorised formulation/linearisation.

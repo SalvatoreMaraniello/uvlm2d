@@ -10,6 +10,8 @@ References:
 	Calculations in the Unsteady Vortex Lattice Method. AIAA Journal, 51(7), 
 	pp.1775–1779.
 '''
+import os, sys
+sys.path.append('..')
 
 import numpy  as np
 import matplotlib.pyplot as plt

@@ -70,6 +70,13 @@ class solver():
 		self.GammaW=np.zeros((Mw,))
 		self.FmatSta = np.zeros((M,Ndim))
 
+		# AIC matrices
+		self.A=np.zeros((self.M,self.M))
+		self.AW=np.zeros((self.M,self.Mw))
+		self.AA=np.zeros((Ndim,self.M,self.M))
+		self.AAWW=np.zeros((Ndim,self.M,self.Mw))
+
+
 		# settings
 		self.PROCESSORS=4
 		self.parallel=False#True
@@ -206,8 +213,8 @@ class solver():
 		@note: it is very hard to get this wrong
 		'''
 
-		self.A=np.zeros((self.M,self.M))
-		self.AW=np.zeros((self.M,self.Mw))
+		#self.A=np.zeros((self.M,self.M))
+		#self.AW=np.zeros((self.M,self.Mw))
 
 		for ii in range(self.M):
 			# bound
@@ -234,23 +241,64 @@ class solver():
 		wake length.
 		'''
 
-		# allocate AIC matrices - positive contribution
-		self.build_AIC_gamma2d()
+		# ----------------------------------------------------------------------
+		# Build AIC from matrix notation - slower
 
-		### convert:
-		# warning: bound needs to be computed first!
-		self.A=np.dot(self.A,self._TgG)+np.dot(self.AW,self._EgG)
-		self.AW=np.dot( self.AW,self._TgG_w )
-		# # "negative" contribution - bound
-		# self.A[:,:-1]+=-self.A[:,1:]
-		# # TE vortex from wake
-		# self.A[:,-1]+=-self.AW[:,0]
-		# # "negative" contribution - wake
-		# self.AW[:,:-1]+=-self.AW[:,1:]
-		# # neglect contribution of last segment of wake
-		# #for ii in range(self.M):
-		# #	self.AW[ii,-1]+= -np.dot( self.Nmat[ii,:],
-		# #			biot_savart_2d(self.Zeta_c[ii,:] ,self.ZetaW[-1,:],gamma=1.0))
+		#self.A=np.zeros((self.M,self.M))
+		#self.AW=np.zeros((self.M,self.Mw))
+
+		# loop collocation point
+		for ii in range(self.M):
+
+			# loop bound vortices
+			for jj in range(self.M):
+				# solve connectivity
+				nn1,nn3=jj,jj+1;
+				# compute infl. coeff.
+				self.AA[:,ii,jj]=biot_savart_vortex_2d(
+					self.Zeta_c[ii,:],self.Zeta[nn1,:],self.Zeta[nn3,:],Gamma=1.)
+			# loop wake vortices
+			for jj in range(self.Mw-1):
+				# solve connectivity
+				nn1,nn3=jj,jj+1
+				# compute infl. coeff.
+				self.AAWW[:,ii,jj]=biot_savart_vortex_2d(
+					self.Zeta_c[ii,:],self.ZetaW[nn1,:],self.ZetaW[nn3,:],Gamma=1.)
+			# last vortex: ignore last segment
+			jj=self.Mw-1
+			nn1=jj
+			self.AAWW[:,ii,jj]=biot_savart_2d(
+					               self.Zeta_c[ii,:],self.ZetaW[nn1,:],gamma=1.)
+
+		# project over normal
+		self.A=np.dot(self._Wnc[0,:,:],self.AA[0,:,:])+\
+										 np.dot(self._Wnc[1,:,:],self.AA[1,:,:])
+		self.AW=np.dot(self._Wnc[0,:,:],self.AAWW[0,:,:])+\
+									   np.dot(self._Wnc[1,:,:],self.AAWW[1,:,:])
+
+
+		# ----------------------------------------------------------------------
+		# Build AIC based on AIC(gamma) - faster
+
+		# # allocate AIC matrices - positive contribution
+		# self.build_AIC_gamma2d()
+
+		# ### convert from gamma to Gamma ('vectorised')
+		# # warning: bound needs to be computed first!
+		# A=np.dot(self.A,self._TgG)+np.dot(self.AW,self._EgG)
+		# AW=np.dot( self.AW,self._TgG_w )
+
+		## ### convert from gamma to Gamma ('manual')
+		## # "negative" contribution - bound
+		## self.A[:,:-1]+=-self.A[:,1:]
+		## # TE vortex from wake
+		## self.A[:,-1]+=-self.AW[:,0]
+		## # "negative" contribution - wake
+		## self.AW[:,:-1]+=-self.AW[:,1:]
+		## # neglect contribution of last segment of wake
+		## #for ii in range(self.M):
+		## #	self.AW[ii,-1]+= -np.dot( self.Nmat[ii,:],
+		## #		biot_savart_2d(self.Zeta_c[ii,:],self.ZetaW[-1,:],gamma=1.))
 
 		return self
 
@@ -566,7 +614,6 @@ class solver():
 
 
 
-
 def biot_savart_2d(cv,zeta,gamma=1.0):
 	'''
 	Compute induced velocity over cv from an infinite filament parallel to
@@ -577,9 +624,28 @@ def biot_savart_2d(cv,zeta,gamma=1.0):
 
 	drv=cv-zeta
 	drabs=np.linalg.norm(drv)
-	qv = 0.5*gamma/np.pi/drabs**2 * np.array([-drv[1],drv[0]])
+	duv = 0.5*gamma/np.pi/drabs**2 * np.array([-drv[1],drv[0]])
 
-	return qv
+	return duv
+
+
+def biot_savart_vortex_2d(cv,zeta1,zeta3,Gamma=1.0):
+	'''
+	Biot-Savart induced velocity of a vortex ring.
+	zeta1 and zeta3 are the coordinates of the corner of the vortex ring. In 2D,
+	these are associated, respectively, to a vorticity Gamma kv and -Gamma kv,
+	where kv is the unit vector (0,0,1).
+	'''
+
+	R1=cv-zeta1
+	R3=cv-zeta3
+	R1=R1/np.linalg.norm(R1)**2
+	R3=R3/np.linalg.norm(R3)**2
+	kcross=np.array([ [0, -1.],
+		              [1,  0] ])
+	duv=0.5*Gamma/np.pi *(  np.dot(kcross,R1) - np.dot(kcross,R3) )	
+
+	return duv
 
 
 
@@ -604,9 +670,15 @@ if __name__=='__main__':
 	plt.close()
 
 	### verify biot-savart
-	#gamma=1.0
-	#qLE=biot_savart_2d( S.Rmat[0,:], S.Rmat[-1,:], gamma=1.0 )
-	#qLEexp=-1./(2.*np.pi*chord)*gamma
+	gamma=1.0
+	qLE=biot_savart_2d( S.Rmat[0,:], S.Rmat[-1,:], gamma=1.0 )
+	qLEexp=-1./(2.*np.pi*chord)*gamma
+
+	qTE_0=biot_savart_2d( S.Rmat[-1,:], S.Rmat[0,:], gamma=1.0 )
+	qTE_1=biot_savart_2d( S.Rmat[-1,:], S.Rmat[1,:], gamma=1.0 )
+	qTE_tot=qTE_0-qTE_1
+	qTE_tot_2=biot_savart_vortex_2d(S.Rmat[-1,:],S.Rmat[0,:],S.Rmat[1,:],
+		                                                             Gamma=1.0 )
 
 	# solution using "gamma"
 	S.solve_static_Gamma2d()
