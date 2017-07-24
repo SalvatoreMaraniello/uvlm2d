@@ -41,7 +41,6 @@ class solver(uvlm2d_sta.solver):
 		self.T=T
 		self.time=np.arange(0.,self.T,self.dt)
 		self.NT=len(self.time)
-		self.tref=self.b/self.Uabs
 
 		# dynamics arrays
 		# @note: the velocity of the bound grid is computed by backward difference

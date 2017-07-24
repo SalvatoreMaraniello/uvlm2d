@@ -19,6 +19,7 @@ import multiprocessing as mpr
 import matplotlib.pyplot as plt
 from IPython import embed
 import save
+import geo
 
 
 class solver():
@@ -43,6 +44,7 @@ class solver():
 		self.qinf=0.5*rho*self.Uabs**2
 		self.gref=self.b*self.Uabs
 		self.Fref=self.rho*self.b*self.Uabs**2
+		self.tref=self.b/self.Uabs
 
 		# vortex nodes
 		self.K, self.Kw=M+1,Mw+1
@@ -70,6 +72,12 @@ class solver():
 		self.GammaW=np.zeros((Mw,))
 		self.FmatSta = np.zeros((M,Ndim))
 
+		# set velocity fields
+		self.dZetadt=np.zeros((self.K,2)) # aerofoil
+		self.Wzeta=np.zeros((self.K,2))   # gust
+		# def background velocity at vortex grid
+		self.Uzeta = np.zeros((self.K,2))
+
 		# AIC matrices
 		self.A=np.zeros((self.M,self.M))
 		self.AW=np.zeros((self.M,self.Mw))
@@ -84,45 +92,76 @@ class solver():
 
 	def build_flat_plate(self):
 		''' 
-		Build geometry of a flat plate at an angle alpha w.r.t the global frame 
-		Oxy. The collocation points are assumed at 50% of vortex ring.
+		Build geometry/flow field of a flat plate at an angle alpha w.r.t the 
+		global frame  Oxy.  
+
 		@warning: alpha is not necessarely the angle between plate and velocity;
 		@warning: if the aerofoil has a velocity, the wake should be displaced. 
 		This effect is not accounted here as in the static solution the wake has 
 		no impact.
 		'''
 
-		# params
-		Ndim=2
-		K,Kw=self.K,self.Kw
-
-		# def wing panels coordinates
-		rLE=2.*self.b*np.array([-np.cos(self.alpha),np.sin(self.alpha)])
-		rTE=np.zeros((Ndim,))
-		for ii in range(Ndim):
-			self.Rmat[:,ii]=np.linspace(rLE[ii],rTE[ii],K)
-
-		# def bound vortices "rings" coordinates
-		dRmat=np.diff(self.Rmat.T).T
-		self.Zeta[:K-1,:]=self.Rmat[:K-1,:]+self.perc_ring*dRmat
-		self.Zeta[-1,:]=self.Zeta[-2,:]+dRmat[-1,:]
-
-		# def wake vortices coordinates
-		dl=2.*self.b/self.M
-		twake=self.Uinf/np.linalg.norm(self.Uinf)
-		EndWake=self.Zeta[-1,:]+self.Mw*dl*twake
-		for ii in range(Ndim):
-			self.ZetaW[:,ii]=np.linspace(self.Zeta[-1,ii],EndWake[ii],Kw)
-
-		# set velocity fields
-		self.dZetadt=np.zeros((self.K,2)) # aerofoil
-		self.Wzeta=np.zeros((self.K,2))   # gust
-		# def background velocity at vortex grid
-		self.Uzeta = np.zeros((K,2))
-		for nn in range(K): 
-			self.Uzeta[nn,:]=self.Uinf
+		self.Rmat,self.Zeta,self.ZetaW,self.Uzeta=\
+			geo.build_flat_plate(self.b,self.alpha,self.Uinf,
+				                                  self.K,self.Kw,self.perc_ring)
 
 		return self
+
+
+	def build_camber_plate(self,Mcamb,Pcamb):
+		''' 
+		Build geometry/flow field of a cambered plate at an angle alpha w.r.t 
+		the global frame  Oxy.
+
+		Mcamb and Pcamb are the maximum camber (in percentage of chord) and the
+		position of max. camber (in 10s of chord). These geometry is built 
+		following the convention for NACA 4 digit aerofoils.
+
+		@warning: alpha is not necessarely the angle between plate and velocity;
+		@warning: if the aerofoil has a velocity, the wake should be displaced. 
+		This effect is not accounted here as in the static solution the wake has 
+		no impact.
+		'''
+
+		self.Rmat,self.Zeta,self.ZetaW,self.Uzeta=\
+			geo.build_camber_plate(self.b,Mcamb,Pcamb,self.alpha,self.Uinf,
+				                                  self.K,self.Kw,self.perc_ring)
+
+		return self
+
+
+	def mapping(self):
+		'''
+		Define mapping between vertices/elements. This function is not used in
+		the nonlinear solution, but is required to make the linear code more
+		clear.
+
+		The mapping is defined as a matrix, Map, such that given an element mm
+			Map_cv[mm,:]=[ nn_0, nn_1]
+		returns the local index, nn_0, nn_1 of the local nodes 0 and 1
+
+		Wake and bound are both numbered starting from 0.
+
+		Map_bw contains the connectivity bound-wake. 
+		'''
+
+		Ndim=2
+
+		# bound
+		self.Map_cv=-1*np.ones((self.M,Ndim),dtype=int)
+		for mm in range(self.M):
+			self.Map_cv[mm,:]=np.array([mm,mm+1])
+
+		# wake
+		self.Map_cv_wake=-1*np.ones((self.Mw,Ndim),dtype=int)
+		for mm in range(self.Mw):
+			self.Map_cv_wake[mm,:]=np.array([mm,mm+1])
+
+		# bound-wake common vertices in the format
+		#			[bound numbering, wake numbering]
+		self.Map_bw=-1*np.ones((1,2),dtype=int)
+		self.Map_bw[0,:]=np.array([self.K-1,0])
+
 
 
 	def get_Nmat(self):
@@ -130,13 +169,19 @@ class solver():
 		Derive normals at collocation points
 		'''
 
+		#Nmat_test=self.Nmat*0.0
 		K=self.K
 
 		kvers=np.array([0.,0.,1.])
+		kcross2D=np.array([[0,-1.],[1,0]])
+
 		DZeta=np.diff(self.Zeta.T).T
 		for ii in range(K-1):
-			self.Nmat[ii,:]=np.array([-DZeta[ii,1],DZeta[ii,0]])/\
+			#Nmat_test[ii,:]=np.array([-DZeta[ii,1],DZeta[ii,0]])/\
+			#                                        np.linalg.norm(DZeta[ii,:])
+			self.Nmat[ii,:]=np.dot(kcross2D,DZeta[ii,:])/\
 			                                         np.linalg.norm(DZeta[ii,:])
+
 
 
 	def get_Wmats(self):
@@ -276,7 +321,6 @@ class solver():
 		self.AW=np.dot(self._Wnc[0,:,:],self.AAWW[0,:,:])+\
 									   np.dot(self._Wnc[1,:,:],self.AAWW[1,:,:])
 
-
 		# ----------------------------------------------------------------------
 		# Build AIC based on AIC(gamma) - faster
 
@@ -309,7 +353,7 @@ class solver():
 		quantities:
 		-length: self.b
 		-velocities: self.Uabs
-		@note: gamma* and Gamma* arrays do not need normalisation.
+		@note: gamma* and Gamma* arrays do not need normalisation in static.
 		'''
 
 		# grid coordinates
@@ -353,6 +397,8 @@ class solver():
 		self.dZetadt=self.dZetadt*self.Uabs
 		self.Wzeta=self.Wzeta*self.Uabs
 		self.Uzeta=self.Uzeta*self.Uabs
+		self.Vcoll=self.Vcoll*self.Uabs
+		self.Vcollperp=self.Vcollperp*self.Uabs
 
 		# dimensionalise gamma* and Gamma* arrays
 		self.gamma=self.gamma*self.gref
@@ -452,10 +498,9 @@ class solver():
 		# - free stream
 		# - aerofil motion
 		self.Vcoll=np.dot(self._Wcv,self.Uzeta+self.Wzeta-self.dZetadt)
-		Vp_check=np.diag(np.dot(self.Nmat,self.Vcoll.T))
+		#Vp_check=np.diag(np.dot(self.Nmat,self.Vcoll.T))
 		self.Vcollperp=np.dot(self._Wnc[0,:,:],self.Vcoll[:,0])+\
 		                                np.dot(self._Wnc[1,:,:],self.Vcoll[:,1])
-
 
 		# get AIC matrices
 		self.build_AIC_Gamma2d()	
@@ -463,12 +508,9 @@ class solver():
 		self.Asys=self.A.copy()
 		self.Asys[:,-1]+=self.AW.sum(1)
 
-
 		### solve:
 		self.Gamma=np.linalg.solve(self.Asys,-self.Vcollperp)
 		self.GammaW=self.Gamma[-1]*np.ones((Mw,))
-
-
 
 		### Produce gamma
 		# self.gamma[0]=self.Gamma[0]
@@ -493,6 +535,7 @@ class solver():
 
 		# Total velocity
 		self.Vtot_zeta=self.Uzeta+self.Wzeta-self.dZetadt+self.Vind_zeta
+		self.Vtot_zeta0=self.Vtot_zeta.copy()
 
 		### Force - Joukovski
 		for nn in range(M):
@@ -516,7 +559,7 @@ class solver():
 		# - at TE gamma=0
 		self.Vind_zeta=0.0*self.Uzeta
 		for nn in range(M):
-			#print('Comp. ind. velocity over node %.2d'%nn)
+
 			# bound vortices "ahead"
 			for kk in range(nn):
 				#print('\tAdding contribution bound vortex-segment %.2d'%kk)
@@ -659,14 +702,18 @@ if __name__=='__main__':
 	# input
 	chord=2.
 	ainf=0.*np.pi/180.
-	S=solver(M=20,Mw=400,b=0.5*chord,
+	S=solver(M=21,Mw=40,b=0.5*chord,
 		     Uinf=10.*np.array([np.cos(ainf),np.sin(ainf)]),
-		     alpha=10.*np.pi/180.,
+		     alpha=0.*np.pi/180.,
 		     rho=1.225)
 
 	# verify geometry
-	S.build_flat_plate()
+	Mcamb,Pcamb=20,3
+	S.build_camber_plate(Mcamb,Pcamb)
+	#S.build_flat_plate()
 	fig,ax=pp.visualise_grid(S)
+	plt.show()
+	1/0
 	plt.close()
 
 	### verify biot-savart
