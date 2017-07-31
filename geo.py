@@ -147,6 +147,16 @@ def rotate_aerofoil(Zeta0,dalpha):
 
 
 
+def rotate_speed(U0,alpha):
+	'''
+	Rotate 2D velocity vector of an angle alpha [rad]. 
+	'''
+	ca,sa=np.cos(alpha),np.sin(alpha)
+	R=np.array([ [ca,-sa], [sa,ca] ])
+	return np.dot(R,U0)
+
+
+
 if __name__=='__main__':
 	
 	import matplotlib.pyplot as plt
@@ -163,4 +173,3 @@ if __name__=='__main__':
 	plt.plot(Zeta[:,0],Zeta[:,1],'b',label='rotated')
 	plt.legend()
 	plt.show()
-

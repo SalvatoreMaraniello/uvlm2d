@@ -1,8 +1,7 @@
 '''
 2D linearised UVLM solver
 author: S. Maraniello
-date: 7 Jun 2017
-version: 1.0.* "towards vectorisation/linearisation"
+date: 15 Jul 2017
 
 Nomenclature as per "State space relatisation of p[otential flow unsteady 
 aerodynamics with arbitrary kinematics
@@ -64,6 +63,8 @@ class solver():#uvlm2d_sta.solver):
 		self.Zeta_c=np.zeros((K-1,Ndim))
 		self.Nmat=np.zeros((K-1,Ndim))
 
+		# class name (for saving)
+		self.name='solstalin'
 
 		# # Utilities: some incremental quantities for geometry modules
 		# self.dalpha=0.0
@@ -107,7 +108,7 @@ class solver():#uvlm2d_sta.solver):
 
 		### increment velocity (airspeed/aerofoil movement) contributions
 		self.Vcoll=np.dot(S0._Wcv,self.Wzeta-self.dZetadt)
-		self.Vcollperp=np.dot(S0._Wnc[0,:,:],self.Vcoll[:,0])+\
+		dVcollperp_a=np.dot(S0._Wnc[0,:,:],self.Vcoll[:,0])+\
 		                                  np.dot(S0._Wnc[1,:,:],self.Vcoll[:,1])
 
 		### bound geometry changes
@@ -122,12 +123,13 @@ class solver():#uvlm2d_sta.solver):
 		dVref_dZeta=self.der_WncV0_dZeta(S0.Uzeta+S0.Wzeta-S0.dZetadt)
 
 		# Linearised contribution
-		dRHS_dZeta=dVind_dZeta+dVindW_dZeta+dVref_dZeta
-		self.dVind=np.dot(dRHS_dZeta[0,:,:],self.Zeta[:,0])+\
-				   						np.dot(dRHS_dZeta[1,:,:],self.Zeta[:,1])
+		self.dVcoll_dZeta=dVind_dZeta+dVindW_dZeta+dVref_dZeta
+		dVcollperp_b=np.dot(self.dVcoll_dZeta[0,:,:],self.Zeta[:,0])+\
+				   			     np.dot(self.dVcoll_dZeta[1,:,:],self.Zeta[:,1])
 
 		# solve
-		self.Gamma=np.linalg.solve(S0.Asys,-self.Vcollperp-self.dVind)
+		self.Gamma=np.linalg.solve(S0.Asys,-dVcollperp_a-dVcollperp_b)
+		self.GammaW[:]=self.Gamma[-1]
 
 		# P.P
 		self.gamma=np.dot(S0._TgG,self.Gamma)
@@ -154,7 +156,8 @@ class solver():#uvlm2d_sta.solver):
 		self.get_total_induced_velocity()
 
 		# Total velocity
-		self.Vtot_zeta=S0.Vtot_zeta+self.Wzeta-self.dZetadt+self.VindTot_zeta
+		self.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt\
+									  +self.Wzeta-self.dZetadt+self.VindTot_zeta
 
 		# Force - Joukovski
 		for nn in range(M):
@@ -274,7 +277,7 @@ class solver():#uvlm2d_sta.solver):
 			nc=self.S0.Nmat[mm,:]
 			# extract vertices of ring with collocation point
 			zeta_a=self.S0.Zeta[map_cv[0],:]
-			zeta_b=self.S0.Zeta[map_cv[1],:]
+			zeta_b=self.S0.Zeta[map_cv[1],:]	
 
 			# loop through bound vortex rings
 			for vv in range(M):
@@ -294,13 +297,16 @@ class solver():#uvlm2d_sta.solver):
 							  zetaA=zeta_a, zetaB=zeta_b,zetaC=zeta_c,
 					                      nvec=nc,CF=cf,gamma=self.S0.Gamma[vv])
 				
-				# allocate partial derivatives w.r.t. vv ring
-				Der[0,mm,map_here]=Der[0,mm,map_here]+DerLocal[0:2]
-				Der[1,mm,map_here]=Der[1,mm,map_here]+DerLocal[2:4]
+				try:
+					# allocate partial derivatives w.r.t. vv ring
+					Der[0,mm,map_here]=Der[0,mm,map_here]+DerLocal[0:2]
+					Der[1,mm,map_here]=Der[1,mm,map_here]+DerLocal[2:4]
 
-				# allocate partial derivatives w.r.t. mm ring
-				Der[0,mm,map_cv]=Der[0,mm,map_cv]+DerLocal[4:6]
-				Der[1,mm,map_cv]=Der[1,mm,map_cv]+DerLocal[6:8]
+					# allocate partial derivatives w.r.t. mm ring
+					Der[0,mm,map_cv]=Der[0,mm,map_cv]+DerLocal[4:6]
+					Der[1,mm,map_cv]=Der[1,mm,map_cv]+DerLocal[6:8]
+				except:
+					embed()
 
 
 			# loop through wake vortex rings

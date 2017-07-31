@@ -66,6 +66,7 @@ class solver():
 		self.Nmat=np.zeros((self.K-1,Ndim))
 
 		# output
+		self.dGammadt=np.zeros((M,)) # for compatibility with linear solver
 		self.gamma=np.zeros((M,))
 		self.gammaW=np.zeros((Mw,))
 		self.Gamma=np.zeros((M,))
@@ -88,6 +89,27 @@ class solver():
 		# settings
 		self.PROCESSORS=4
 		self.parallel=False#True
+
+		#savename
+		self._saveout=True
+		self._savedir='./res/'
+		self._savename='dummy_sta.h5'
+
+		# Prepare Input/Output classes
+		self.SolSta=save.Output('solsta')
+		self.SolSta.Param=save.Output('params')
+		self.SolSta.Param.drop(
+			M=self.M,Mw=self.Mw,b=self.b,alpha=self.alpha,Uinf=self.Uinf,
+				  rho=self.rho,qinf=self.qinf,perc_ring=self.perc_ring,
+						  perc_coll=self.perc_coll,perc_interp=self.perc_interp)
+		self.SolSta.Input=save.Output('input')
+		self.SolSta.Input.drop(Zeta=self.Zeta,ZetaW=self.ZetaW,Wzeta=self.Wzeta)
+		self.SolSta.State=save.Output('state')
+		self.SolSta.State.drop(Gamma=self.Gamma,GammaW=self.GammaW)
+		self.SolSta.Output=save.Output('output')
+		self.SolSta.Output.drop(FmatSta=self.FmatSta)
+
+
 
 
 	def build_flat_plate(self):
@@ -535,7 +557,7 @@ class solver():
 
 		# Total velocity
 		self.Vtot_zeta=self.Uzeta+self.Wzeta-self.dZetadt+self.Vind_zeta
-		self.Vtot_zeta0=self.Vtot_zeta.copy()
+		#self.Vtot_zeta0=self.Vtot_zeta.copy()
 
 		### Force - Joukovski
 		for nn in range(M):
@@ -544,6 +566,9 @@ class solver():
 
 		# dimensionalise
 		self.dimvars()
+
+		if self._saveout:
+			save.h5file(self._savedir,self._savename, *(self.SolSta,) )
 
 
 	def get_induced_velocity(self):

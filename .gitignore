@@ -1,2 +1,4 @@
 test/.ipynb*
+test/*html
 __pycache__
+working_plan.txt
