@@ -81,6 +81,9 @@ class solver(uvlm2d_sta.solver):
 		self._savedir='./res/'
 		self._savename='dummy.h5'
 
+		# class name (for saving)
+		self.name='soldyn'
+
 
 
 	def nondimvars(self):
@@ -208,8 +211,8 @@ class solver(uvlm2d_sta.solver):
 
 	def solve_dyn_Gamma2d(self):
 		'''
-		In this method, the wake is assumed to be frozen (for the purpose of 
-		of linearisation the wake is frozen)
+		In this method, the wake is assumed to be propagate with the free-stream 
+		velocity only.
 
 		This solution imposes the steady kutta condition at the trailing edge,
 		namely: 

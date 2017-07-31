@@ -38,6 +38,11 @@ def plunge(S,f0,H):
 	# def. velocity at t=0
 	S.dZetadt[:,1]=0.0
 
+	### Linear model case:
+	if hasattr(S,'THdZetadt'):
+		for tt in range(S.NT):
+			S.THdZetadt[tt,:,1]=H*2.*np.pi*f0*np.sin(2.*np.pi*f0*S.time[tt])
+
 	### sinusoidal version
 	### Zeta[ii,1](t) = Zeta[ii,1](t=0) + H*sin(2*pi*f0*t)
 	# # def. position

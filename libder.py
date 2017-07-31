@@ -98,12 +98,20 @@ def der_Wnc0AGamma_dZeta(zeta01,zeta02,zetaA,zetaB,zetaC,nvec,CF,gamma,
 			-CF*gamma*(n0_x*R01sq + (R01_x*n0_y - R01_y*n0_x)*2*R01_y)/(2*R01sq**2) ,
 			])
 
-
-
-
-
-
 	return Der
 
 
+
+def der_NormalArea_dZeta(zeta01,zeta02,dGamma):
+	'''
+	This is one of the 2 terms composing the added mass. This term does not
+	depend on the coordinates of the element, so the input variables zeta01,02 
+	(the coordinates of the element vertices) are ficticious. 
+	- dGamma is the time derivative of circulation change at the ring.
+	'''
+
+	Der=-dGamma*np.array([[0., 0., 1., -1.], 
+		                  [-1., 1., 0., 0.]])
+
+	return Der
 

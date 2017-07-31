@@ -17,24 +17,36 @@ from IPython import embed
 def sin(S,w0,L,ImpStart=False):
 	'''
 	Defines a sinusoidal gust with only vertical component moving horizontally
-	at velocity S.Uinf[0]
+	at velocity S.Uinf[0]/S.S0.Uinf[0].
+	The method accept an instance of both the linear and geometrically-exact
+	solvers, lin_uvlm2d_dym.solver and uvlm2d_dym.solver.
 
-	@warning: the gusy shape only depends on the horizontal coordinates of the
+	@warning: the gust shape only depends on the horizontal coordinates of the
 	aerofoil. The x coordinates of the aerofoil and its wake are assumed not to 
-	vary significantly in time.
+	vary in time.
+
 	'''	
 
-
-	# get aerofoil and wake x coordinates at t=0
-	# x=0 at LE
-	xcoord=np.concatenate( (S.Zeta[:,0],S.ZetaW[:,0]) ) - S.Zeta[0,0]
-
+	### set gust parameters
 	C=2.*np.pi/L
-	for tt in range(S.NT):
-		wgust = w0*np.sin( C*(S.Uinf[0]*S.time[tt] - xcoord) )
+	if hasattr(S,'Uinf'): Ux=S.Uinf[0]
+	else: Ux=S.S0.Uinf[0]
 
-		S.THWzeta[tt,:,1]=wgust[:S.K]
-		S.THWzetaW[tt,:,1]=wgust[S.K:]
+	### rescale grid x coordinates at t=0
+	if hasattr(S,'ZetaW'): # exact sol.
+		xcoord=np.concatenate( (S.Zeta[:,0],S.ZetaW[:,0]) ) - S.Zeta[0,0]
+	else: # linearised model
+		xcoord=S.Zeta[:,0]-S.Zeta[0,0]
+
+	### set profile
+	for tt in range(S.NT):
+		wgust = w0*np.sin( C*(Ux*S.time[tt] - xcoord) )
+
+		if hasattr(S,'THWzetaW'):
+			S.THWzeta[tt,:,1]=wgust[:K]
+			S.THWzetaW[tt,:,1]=wgust[K:]
+		else:
+			S.THWzeta[tt,:,1]=wgust
 
 	if ImpStart==False:
 		S.Wzeta[:,1]=S.THWzeta[0,:,1]
