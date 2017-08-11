@@ -269,7 +269,7 @@ class solver(uvlm2d_sta.solver):
 		self.THgammaW[0,:]=self.gammaW
 		self.THGamma[0,:]=self.Gamma
 		self.THGammaW[0,:]=self.GammaW
-		self.THFaero[0,:]=self.FmatSta.sum(0)		
+		self.THFaero[0,:]=self.Faero.sum(0)		
 
 		if self.parallel==True: 
 			pool = mpr.Pool(processes=self.PROCESSORS)

@@ -131,7 +131,13 @@ def garrick_drag_pitch(w,A,c,rhoinf,uinf,x12,time):
 
 def sears_lift_sin_gust(w0,L,Uinf,chord,tv):
 	'''
-	Returns the lift coefficient for a sinusoidal gust (see set_gust.sin).
+	Returns the lift coefficient for a sinusoidal gust (see set_gust.sin) as
+	the imaginary part of the CL complex function defined below. The input gust
+	must be the imaginary part of
+		wgust = w0*np.exp(1.0j*C*(Ux*S.time[tt] - xcoord) )
+	with:
+		C=2.*np.pi/L
+	and xcoord=0 at the aerofoil half-chord.
 	'''
 
 	# reduced frequency
@@ -145,6 +151,7 @@ def sears_lift_sin_gust(w0,L,Uinf,chord,tv):
 
 	phase=np.angle(S)
 	CL=2.*np.pi*w0/Uinf * np.abs(S) * np.sin(2.*np.pi*Uinf/L*tv + phase)
+	#CL=np.imag(2.*np.pi*w0/Uinf * np.abs(S) * np.exp(1.0j*2.*np.pi*Uinf/L*tv))
 
 	return CL
 

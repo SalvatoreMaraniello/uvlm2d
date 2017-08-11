@@ -1,14 +1,12 @@
 '''
 Created on 21 Sep 2015
-
+Modified: 9 aug 2017
 @author: sm6110
-
-Adapted from BeamLib/src/optimiser/wrapper/pysrc/lib.read
-
 '''
 
 import h5py
 from warnings import warn
+from IPython import embed
 
 
 def h5file(filename,ReadList=None):
@@ -28,66 +26,72 @@ def h5file(filename,ReadList=None):
     
     if name is an attribute, this is read as such.
     if name refers to a group, all entries of the group are read
-    if name = 'grp/attr' only the attribute attr of the group grp is read
-    
     '''
     
     class H: pass
     Hinst=H()
      
-    # read and scan file
+    ### read and scan file
     hdfile=h5py.File(filename,'r')
+
     NamesList=[]                   # dataset names
     hdfile.visit(NamesList.append)
     
-    # find SubList (required in case a class has to be read)
-    if ReadList is None:
-        SubList=NamesList
-    else:
-        SubList=[]
+    ### Identify higher level groups / attributes
+    if ReadList is None: 
+        MainLev=[]
         for name in NamesList:
-            for readname in ReadList:
-                if readname in name:
-                    SubList.append(name)
+            if '/' not in name: MainLev.append(name)
+    else:
+        MainLev=ReadList
 
-    
-    for name in SubList:
-        #print('Found %s...'%name)
-        if type(hdfile[name]) is h5py._hl.group.Group:  # @UndefinedVariable
-            #print('    %s is a group!' %name)
-            if hasattr(Hinst,'name') is False:
-                setattr(Hinst,name,H())
+    ### Loop through higher level
+    for name in MainLev:
+        # sub-group
+        if type(hdfile[name]) is h5py._hl.group.Group:
+            print('adding group %s as subclass' %name)
+            Ginst=read_group_as_class(hdfile[name])
+            setattr(Hinst,name,Ginst)
         else:
-            if '/' in name:
-                subnames=name.split('/')
-                if hasattr(Hinst,subnames[0]) is False:
-                    setattr(Hinst,subnames[0],H())
-                #print('    Extracting class %s'%subnames[0])
-                subclass=getattr(Hinst,subnames[0])
-                #print('    Allocating attribute %s'%subnames[1])
-                setattr(subclass,subnames[1],hdfile[name].value)
-                #print('    copying subclass %s back'%subnames[0])
-                setattr(Hinst,subnames[0],subclass)
-            else:
-                setattr(Hinst,name,hdfile[name].value)
+            print('adding attribute %s' %name)
+            setattr(Hinst,name,hdfile[name].value)
 
-    '''
-    #setattr(XBinst,'FollowerForce',hdfile['FollowerForce'].value)
-
-    # parameters for constant beam span reconstruction 
-    XBinst = conditional_reading(hdfile,XBinst,'cs_l2')
-
-    setattr(XBinst,'',hdfile[''].value)
-    XBinst = conditional_reading(hdfile,XBinst,'')
-    '''
-    
     # close and return
     hdfile.close()  
-    
-    a=1
-    
+        
     return Hinst  
-  
+
+
+
+def read_group_as_class(Grp):
+    '''
+    Read an hdf5 group
+    '''
+
+    class H: pass
+    Hinst=H()
+
+    NamesList=[]
+    Grp.visit(NamesList.append)
+
+    ### identify higher level
+    MainLev=[]
+    for name in NamesList:
+        if '/' not in name: MainLev.append(name)
+
+    ### Loop through higher level
+    for name in MainLev:
+        # sub-group
+        if type(Grp[name]) is h5py._hl.group.Group:
+            print('adding subclass %s' %name)
+            Ginst=read_group_as_class(Grp[name])
+            setattr(Hinst,name,Ginst)
+        else:
+            print('adding attribute %s' %name)
+            setattr(Hinst,name,Grp[name].value)
+
+    return Hinst
+
 
   
 def h5series(rootname,ReadList=None,N0=0):
@@ -199,27 +203,7 @@ def collect(Hlist,ReadList):
 
 
 if __name__=='__main__':
-    
-    # read one file 
-    filename='/home/sm6110/git/SHARPy_studies/aerocomp/hale/opt/res_rig/opt_hale_noyaw_sig100_Umag0_fi4_Umagflow25_alpha0_010.h5'
-    hd=h5file(filename,['cost','gdis','geq/val']) 
-   
-    # read a series
-    #ReadList=['Design','gdis/val','gdis/jac']
-    ReadList=None
-    fileroot='/home/sm6110/git/SHARPy_studies/aerocomp/hale/opt/res_rig/opt_hale_noyaw_sig100_Umag0_fi4_Umagflow25_alpha0_'
-    Hseries=h5series(fileroot,ReadList)
-   
-    # or a list of files
-    FileList=['/home/sm6110/git/SHARPy_studies/aerocomp/hale/opt/res_rig/opt_hale_noyaw_sig100_Umag0_fi4_Umagflow25_alpha0_001.h5',
-              '/home/sm6110/git/SHARPy_studies/aerocomp/hale/opt/res_rig/opt_hale_noyaw_sig100_Umag0_fi4_Umagflow25_alpha0_008.h5',
-              ]
-    
-    # and collect them
-    ValList = collect( Hseries, ['Design/x', 'cost/val', 'cost/jac'] )
-      
-    a=1
-
+    pass
        
 
 

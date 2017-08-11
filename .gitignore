@@ -1,4 +1,13 @@
 test/.ipynb*
 test/*html
+test/res
+
+convergence/res
+convergence/figs
+convergence/*pdf
+
+res
+
 __pycache__
 working_plan.txt
+

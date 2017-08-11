@@ -17,7 +17,8 @@ from IPython import embed
 def sin(S,w0,L,ImpStart=False):
 	'''
 	Defines a sinusoidal gust with only vertical component moving horizontally
-	at velocity S.Uinf[0]/S.S0.Uinf[0].
+	at velocity S.Uinf[0]/S.S0.Uinf[0]. The gust is defined according to
+	Sears, with the x coordinate being zero at the half choord.
 	The method accept an instance of both the linear and geometrically-exact
 	solvers, lin_uvlm2d_dym.solver and uvlm2d_dym.solver.
 
@@ -34,17 +35,17 @@ def sin(S,w0,L,ImpStart=False):
 
 	### rescale grid x coordinates at t=0
 	if hasattr(S,'ZetaW'): # exact sol.
-		xcoord=np.concatenate( (S.Zeta[:,0],S.ZetaW[:,0]) ) - S.Zeta[0,0]
+		xcoord=np.concatenate( (S.Zeta[:,0],S.ZetaW[:,0]) )+S.b
 	else: # linearised model
-		xcoord=S.Zeta[:,0]-S.Zeta[0,0]
+		xcoord=S.S0.Zeta[:,0]+S.S0.b
 
 	### set profile
 	for tt in range(S.NT):
 		wgust = w0*np.sin( C*(Ux*S.time[tt] - xcoord) )
 
 		if hasattr(S,'THWzetaW'):
-			S.THWzeta[tt,:,1]=wgust[:K]
-			S.THWzetaW[tt,:,1]=wgust[K:]
+			S.THWzeta[tt,:,1]=wgust[:S.K]
+			S.THWzetaW[tt,:,1]=wgust[S.K:]
 		else:
 			S.THWzeta[tt,:,1]=wgust
 

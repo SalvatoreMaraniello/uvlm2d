@@ -47,7 +47,7 @@ class solver():
 		self.tref=self.b/self.Uabs
 
 		# vortex nodes
-		self.K, self.Kw=M+1,Mw+1
+		self.K,self.Kw=M+1,Mw+1
 
 		# parameters
 		self.perc_ring=0.25  # backward shift of vortex panels wrt physical panels
@@ -71,7 +71,7 @@ class solver():
 		self.gammaW=np.zeros((Mw,))
 		self.Gamma=np.zeros((M,))
 		self.GammaW=np.zeros((Mw,))
-		self.FmatSta = np.zeros((M,Ndim))
+		self.Faero = np.zeros((self.K,Ndim))
 
 		# set velocity fields
 		self.dZetadt=np.zeros((self.K,2)) # aerofoil
@@ -98,19 +98,9 @@ class solver():
 		# Prepare Input/Output classes
 		self.SolSta=save.Output('solsta')
 		self.SolSta.Param=save.Output('params')
-		self.SolSta.Param.drop(
-			M=self.M,Mw=self.Mw,b=self.b,alpha=self.alpha,Uinf=self.Uinf,
-				  rho=self.rho,qinf=self.qinf,perc_ring=self.perc_ring,
-						  perc_coll=self.perc_coll,perc_interp=self.perc_interp)
 		self.SolSta.Input=save.Output('input')
-		self.SolSta.Input.drop(Zeta=self.Zeta,ZetaW=self.ZetaW,Wzeta=self.Wzeta)
 		self.SolSta.State=save.Output('state')
-		self.SolSta.State.drop(Gamma=self.Gamma,GammaW=self.GammaW)
 		self.SolSta.Output=save.Output('output')
-		self.SolSta.Output.drop(FmatSta=self.FmatSta)
-
-
-
 
 	def build_flat_plate(self):
 		''' 
@@ -234,6 +224,28 @@ class solver():
 		self._Wnc=np.zeros((Ndim,K-1,K-1))
 		for dd in range(Ndim):
 			self._Wnc[dd,:,:]=np.diag(self.Nmat[:,dd])
+
+
+	def get_force_matrices(self):
+		''' Produce matrices to interpolate the force from segments and 
+		collocation points to grid points.
+
+		@warning: method not used in this implementation of the exact sol. but
+		used for linearised sol.
+		'''
+
+		M,K=self.M,self.K
+		Iseg=np.zeros((K,M))
+		Icoll=np.zeros((K,M))
+
+		Iseg[:M,:]=np.eye(M)
+		#Icoll
+		wvcoll=np.zeros((K,))
+		wvcoll[0]=1.-self.perc_interp 
+		wvcoll[1]=self.perc_interp 
+		Icoll=scalg.circulant(wvcoll)[:,:M]
+
+		return Iseg, Icoll	
 
 
 	def get_Gamma_conversion_matrices(self):
@@ -397,7 +409,7 @@ class solver():
 		self.GammaW=self.GammaW/self.gref
 
 		# output
-		self.FmatSta=self.FmatSta/self.Fref
+		self.Fero=self.Faero/self.Fref
 
 
 	def dimvars(self):
@@ -429,7 +441,7 @@ class solver():
 		self.GammaW=self.GammaW*self.gref
 
 		# output
-		self.FmatSta=self.FmatSta*self.Fref
+		self.Faero=self.Faero*self.Fref
 
 
 	def solve_static_gamma2d(self):
@@ -441,6 +453,8 @@ class solver():
 
 		K,Kw=self.K,self.Kw
 		M,Mw=self.M,self.Mw
+
+		Fjouk=np.zeros((M,Ndim))  # force at segments (grid in 2D)
 
 		# Nondimensionalise
 		self.nondimvars()
@@ -486,8 +500,12 @@ class solver():
 
 		### Force - Joukovski
 		for nn in range(M):
-			self.FmatSta[nn,:]=-self.gamma[nn]*\
+			Fjouk[nn,:]=-self.gamma[nn]*\
 			              np.array([-self.Vtot_zeta[nn,1],self.Vtot_zeta[nn,0]])
+
+		# project segments to grid
+		Iseg,Icoll=self.get_force_matrices()
+		self.Faero=np.dot(Iseg,Fjouk)
 
 		# dimensionalise
 		self.dimvars()
@@ -503,6 +521,8 @@ class solver():
 
 		K,Kw=self.K,self.Kw
 		M,Mw=self.M,self.Mw
+
+		Fjouk=np.zeros((M,Ndim))  # force at segments (grid in 2D)
 
 		# nondimensionalise
 		self.nondimvars()
@@ -561,13 +581,26 @@ class solver():
 
 		### Force - Joukovski
 		for nn in range(M):
-			self.FmatSta[nn,:]=-self.gamma[nn]*\
+			Fjouk[nn,:]=-self.gamma[nn]*\
 			              np.array([-self.Vtot_zeta[nn,1],self.Vtot_zeta[nn,0]])
+
+		# project segments to grid
+		Iseg,Icoll=self.get_force_matrices()
+		self.Faero=np.dot(Iseg,Fjouk)
 
 		# dimensionalise
 		self.dimvars()
 
 		if self._saveout:
+			self.SolSta.Param.drop(
+				M=self.M,Mw=self.Mw,b=self.b,alpha=self.alpha,Uinf=self.Uinf,
+					  rho=self.rho,qinf=self.qinf,perc_ring=self.perc_ring,
+						  perc_coll=self.perc_coll,perc_interp=self.perc_interp)
+			self.SolSta.Input.drop(Zeta=self.Zeta,ZetaW=self.ZetaW,
+				                                               Wzeta=self.Wzeta)
+			self.SolSta.State.drop(Gamma=self.Gamma,GammaW=self.GammaW)
+			self.SolSta.Output.drop(Faero=self.Faero)
+
 			save.h5file(self._savedir,self._savename, *(self.SolSta,) )
 
 
@@ -768,10 +801,10 @@ if __name__=='__main__':
 
 
 	# Aero forces
-	Ftot=S.FmatSta.sum(0)
+	Ftot=S.Faero.sum(0)
 	Mte=0.0
-	for nn in range(S.M):
-		Mte+=S.FmatSta[nn,1]*S.Zeta[nn,0]-S.FmatSta[nn,0]*S.Zeta[nn,1]
+	for nn in range(S.K):
+		Mte+=S.Faero[nn,1]*S.Zeta[nn,0]-S.Faero[nn,0]*S.Zeta[nn,1]
 	rAC=np.zeros((2,))
 	rAC[0]=np.interp(0.25*S.M,np.linspace(0,S.M,S.M+1),S.Rmat[:,0])
 	rAC[1]=np.interp(0.25*S.M,np.linspace(0,S.M,S.M+1),S.Rmat[:,1])

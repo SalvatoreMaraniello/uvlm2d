@@ -18,7 +18,6 @@ def h5file(savedir,h5filename, *class_inst):
     @param savedir: target directory
     @param h5filename: file name
     @param *class_inst: a number of classes to save
-
     '''
 
     os.system('mkdir -p %s'%savedir)
@@ -27,7 +26,7 @@ def h5file(savedir,h5filename, *class_inst):
     hdfile=h5py.File(h5filename,'w')
     
     for cc in class_inst:
-        print('Adding %s' %cc)
+        #print('Adding %s' %cc)
         add_class_as_grp(cc,hdfile)
 
 

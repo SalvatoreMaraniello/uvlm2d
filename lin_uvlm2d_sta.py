@@ -4,7 +4,7 @@ author: S. Maraniello
 date: 15 Jul 2017
 
 Nomenclature as per "State space relatisation of p[otential flow unsteady 
-aerodynamics with arbitrary kinematics
+aerodynamics with arbitrary kinematics"
 
 Ref.[1]: Anderson, Fundamentals of Aerodynamics
 Ref.[2]: Simpson, Palacios and Maraniello, Scitech 2017
@@ -57,7 +57,7 @@ class solver():#uvlm2d_sta.solver):
 		self.Wzeta=np.zeros((K,Ndim))
 
 		# Output
-		self.FmatSta=np.zeros((M,Ndim))
+		self.Faero=np.zeros((K,Ndim))
 
 		# Other: collocation points and normals
 		self.Zeta_c=np.zeros((K-1,Ndim))
@@ -65,30 +65,6 @@ class solver():#uvlm2d_sta.solver):
 
 		# class name (for saving)
 		self.name='solstalin'
-
-		# # Utilities: some incremental quantities for geometry modules
-		# self.dalpha=0.0
-		# self.dUinf=0.0
-
-
-	# def build_flat_plate(self):
-	# 	''' 
-	# 	Build geometry/flow field of a flat plate at an angle alpha w.r.t the 
-	# 	global frame  Oxy.  
-
-	# 	@warning: alpha is not necessarely the angle between plate and velocity;
-	# 	@warning: if the aerofoil has a velocity, the wake should be displaced. 
-	# 	This effect is not accounted here as in the static solution the wake has 
-	# 	no impact.
-	# 	'''
-
-	# 	S0=self.S0
-
-	# 	self.dRmat,self.Zeta,self.ZetaW,self.Wzeta=\
-	# 		geo.build_flat_plate(S0.b,self.dalpha,self.dUinf,
-	# 			                   S0.M,S0.Mw,S0.K,S0.Kw,S0.perc_ring)
-
-	# 	return self
 
 
 	def solve_static_Gamma2d(self):
@@ -99,6 +75,8 @@ class solver():#uvlm2d_sta.solver):
 
 		# pointer to self.S0
 		S0=self.S0
+
+		Fjouk=np.zeros((K,Ndim))
 
 		# normalise
 		self.nondimvars()
@@ -136,35 +114,25 @@ class solver():#uvlm2d_sta.solver):
 		self.gammaW=np.dot(S0._TgG_w,self.GammaW)+np.dot(S0._EgG,self.Gamma)
 
 
-		###################################### Compute Output - STILL NONLINEAR
-		#
-		# The variables here defined are TOTAL, i.e. due to incremental +
-		# reference displacement/velocities
+		### Linearised delta force
 
-		# Total Vorticity
-		self.GammaTot=S0.Gamma+self.Gamma
-		self.GammaWTot=S0.GammaW+self.GammaW
-		self.gammaTot=S0.gamma+self.gamma
-		self.gammaWTot=S0.gammaW+self.gammaW
+		# Partial derivatived
+		self.DFj_dGamma,self.DFj_dGammaW=self.der_Fjouk_dGamma_vind()
+		self.DFj_dGamma=self.DFj_dGamma+self.der_Fjouk_dGamma_vtot0()
+		self.DFj_dV=self.der_Fjouk_dV()
+		self.DFj_dZeta=self.der_Fjouk_dZeta_vind()
 
-		# Total deformations (wake only changed at bound/wake interface)
-		self.ZetaTot=S0.Zeta+self.Zeta
-		self.ZetaWTot=S0.ZetaW.copy()
-		self.ZetaWTot[S0.Map_bw[:,1],:]=self.ZetaTot[S0.Map_bw[:,0]] 
-
-		# Total induced velocity
-		self.get_total_induced_velocity()
-
-		# Total velocity
-		self.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt\
-									  +self.Wzeta-self.dZetadt+self.VindTot_zeta
-
-		# Force - Joukovski
-		for nn in range(M):
-			self.FmatSta[nn,:]=-self.gammaTot[nn]*\
-			              np.array([-self.Vtot_zeta[nn,1],self.Vtot_zeta[nn,0]])
-
-		################################## end Compute output - STILL NONLINEAR
+		# incremental force
+		for dd in range(Ndim):
+			# state terms
+			self.Faero[:,dd]=np.dot(self.DFj_dGamma[dd,:,:],self.Gamma)+\
+								    np.dot(self.DFj_dGammaW[dd,:,:],self.GammaW)
+			# input terms
+			for tt in range(Ndim):
+				self.Faero[:,dd]=self.Faero[:,dd]+\
+					np.dot(self.DFj_dZeta[dd,:,tt,:],self.Zeta[:,tt])+\
+								np.dot(self.DFj_dV[dd,:,tt,:],
+						                    self.Wzeta[:,tt]-self.dZetadt[:,tt])
 
 		# dimensionalise
 		self.dimvars()
@@ -212,7 +180,6 @@ class solver():#uvlm2d_sta.solver):
 			### Add last segment of wake
 			#self.Vind_zeta[nn,:]+=-biot_savart_2d(self.Zeta[nn,:],
 			#	                               self.ZetaW[-1,:],self.GammaW[-1])
-
 
 
 	def der_WncV0_dZeta(self,V0):
@@ -351,6 +318,314 @@ class solver():#uvlm2d_sta.solver):
 
 
 
+	def der_Fjouk_dV(self):
+		'''
+		Computes the derivative of the Joukovski force (defined at each segment)
+		w.r.t gust/aerofoil velocity at the same segments, 
+		np.dot(Iseg,self.Wzeta) and np.dot(Iseg,self.dZetadt).
+		'''
+
+		Ndim=2
+		K=self.S0.K
+		M=self.S0.M
+		Kcross2D=np.array([[0,-1],[1,0]])
+
+		### derivative segment-to-segment
+		# this assumes input velocity and output force are at the segments
+		DerSeg=np.zeros((Ndim,M,Ndim,M))
+		# loop through segments
+		for ss in range(M):
+			DerSeg[:,ss,:,ss]=-Kcross2D*self.S0.gamma[ss]
+
+		### derivative grid to grid
+		Der=np.zeros((Ndim,K,Ndim,K))
+
+		#Interp. matrix from nodes to segment
+		Iseg,Icoll=self.S0.get_force_matrices()
+		for dd in range(Ndim):
+			for nn in range(Ndim):
+				Der[dd,:,nn,:]=np.dot( Iseg, np.dot(DerSeg[dd,:,nn,:],Iseg.T) )
+
+		return Der
+
+
+
+	def der_Fjouk_dGamma_vtot0(self):
+		'''
+		Computes the derivative of the Joukovski force (defined at each segment)
+		w.r.t variation of bound circulations at constant total velocity.
+		Note that this is not the only dependency of the Joukovski force w.r.t.
+		the circulation, as an other contribution is given by the variation
+		of induced velocity.
+		'''
+
+		Ndim=2
+		K=self.S0.K
+		M=self.S0.M
+		Kcross2D=np.array([[0,-1],[1,0]])
+
+		### induced velocity at grid points:
+		#self.S0.get_induced_velocity()
+		## Total velocity
+		#self.S0.Vtot_zeta=self.Uzeta+self.Wzeta-self.dZetadt+self.Vind_zeta
+
+		### derivative segment-to-segment
+		# this assumes  output forces are at the segments
+		DerSeg=np.zeros((Ndim,M,M))
+		# loop through segments
+		for ss in range(M):
+			DerSeg[:,ss,ss]=-np.dot(Kcross2D,self.S0.Vtot_zeta[ss,:])
+
+		### derivative grid to grid
+		Der=np.zeros((Ndim,K,M))
+		#Interp. matrix from nodes to segment
+		Iseg,Icoll=self.S0.get_force_matrices()
+		for dd in range(Ndim):
+			Der[dd,:,:]=np.dot( Iseg, np.dot(DerSeg[dd,:,:],self.S0._TgG) )
+
+		return Der
+
+
+	def der_Fjouk_dGamma_vind(self):
+		'''
+		Computes the derivative of the Joukovski force (defined at each segment)
+		w.r.t variation of circulations associated to changes of induced 
+		velocity.
+		Note that this is not the only dependency of the Joukovski force w.r.t.
+		the circulation, as an other contribution is given by the variation
+		of circulation at constant total velocity.
+		'''
+
+		Ndim=2
+		K=self.S0.K
+		M,Mw=self.S0.M,self.S0.Mw
+		S0=self.S0
+
+		Kcross2D=np.array([[0,-1],[1,0]])
+
+		FFseg_gamma=np.zeros((Ndim,M,M))
+		FFWWseg_gamma=np.zeros((Ndim,M,Mw))
+		FFseg=np.zeros((Ndim,K,M))
+		FFWWseg=np.zeros((Ndim,K,Mw))
+
+		# loop bound segments
+		for ii in range(M):
+			# target segment
+			zeta_seg=S0.Zeta[ii,:]
+
+			# loop bound segments
+			for jj in range(M):
+				# neglect self-infuced velocity contribution
+				if jj==ii:
+					continue
+				vind=biot_savart_2d(zeta_seg,S0.Zeta[jj,:],gamma=1.)
+				# compute infl. coeff.
+				FFseg_gamma[:,ii,jj]=-S0.gamma[ii]*np.dot(Kcross2D,vind)
+
+			# loop wake segments
+			for jj in range(Mw):
+				# compute infl. coeff.
+				vind=biot_savart_2d(zeta_seg,S0.ZetaW[jj,:],gamma=1.)
+				FFWWseg_gamma[:,ii,jj]=-S0.gamma[ii]*np.dot(Kcross2D,vind)
+
+		# convert
+		Iseg,Icoll=self.S0.get_force_matrices()
+		for dd in range(Ndim):
+			FFseg[dd,:,:]=np.dot(Iseg,\
+				                     np.dot(FFseg_gamma[dd,:,:],S0._TgG)+
+                                          np.dot(FFWWseg_gamma[dd,:,:],S0._EgG))
+			FFWWseg[dd,:,:]=np.dot(Iseg,np.dot(FFWWseg_gamma[dd,:,:],S0._TgG_w))
+
+		return FFseg,FFWWseg
+
+
+
+	def der_Fjouk_dZeta_vind(self):
+		'''
+		Derivative of Joukovski force w.r.t. changes of induced velocity at
+		each segment associated to grid coordinates variations.
+		'''
+
+		Ndim=2
+		K=self.S0.K
+		M=self.S0.M
+		Mw=self.S0.Mw
+
+		Der=np.zeros((Ndim,M,Ndim,K))
+		DerOut=np.zeros((Ndim,K,Ndim,K))
+
+		# loop segments
+		for ss in range(M):
+			# warning: ss is both segment number and vertex number. In 3D these 
+			# will be different
+
+			# extract vertex coordinates
+			zeta_c=self.S0.Zeta[ss,:]
+
+			# loop through bound vortex rings
+			for vv in range(M):
+
+				# identify nodes of vortex ring
+				map_here=self.S0.Map_cv[vv,:]
+				# extract coordinates
+				ZetaLocal=self.S0.Zeta[map_here,:]
+
+				### Derivative of total induced velocity of ring vv
+				cf=0.5/np.pi
+				DerLocal=libder.der_Fjouk_ind_zeta(
+					zeta01=ZetaLocal[0,:],zeta02=ZetaLocal[1,:],
+						zetaCA=zeta_c,zetaCB=zeta_c,CF=cf,
+						      Gamma=self.S0.Gamma[vv],gamma_s=self.S0.gamma[ss])
+				
+				# zero the terms associated to zeta01 and zetaCA if equal
+				# (and similarly for zeta02 and zetaCB)
+				for ii in range(len(map_here)):
+					if map_here[ii]==ss:
+						DerLocal[:,ii::2]=0.0 
+
+				# allocate partial derivatives w.r.t. vv ring
+				Der[:,ss,0,map_here]=Der[:,ss,0,map_here]+DerLocal[:,0:2]
+				Der[:,ss,1,map_here]=Der[:,ss,1,map_here]+DerLocal[:,2:4]
+				# allocate partial derivatives w.r.t. ss segment vertex
+				Der[:,ss,0,ss]=Der[:,ss,0,ss]+DerLocal[:,4]+DerLocal[:,5]
+				Der[:,ss,1,ss]=Der[:,ss,1,ss]+DerLocal[:,6]+DerLocal[:,7]
+
+
+			# loop through wake vortex rings
+			for vv in range(Mw):
+
+				# identify last vortex (neglect last segment)
+				if vv==Mw-1: allring=False
+				else: allring=True
+
+				# identify nodes of vortex ring
+				map_here=self.S0.Map_cv_wake[vv,:]
+				# extract coordinates
+				ZetaLocal=self.S0.ZetaW[map_here,:]
+
+				### Derivative of total induced velocity of ring vv
+				cf=0.5/np.pi
+				DerLocal=libder.der_Fjouk_ind_zeta(
+					zeta01=ZetaLocal[0,:],zeta02=ZetaLocal[1,:],
+					zetaCA=zeta_c,zetaCB=zeta_c,CF=cf,Gamma=self.S0.GammaW[vv],
+					                  gamma_s=self.S0.gamma[ss],allring=allring)
+
+				### zero the terms associated to zeta01,zeta02 if equal to zeta_c
+				# this can occur only if were evaluating Fjouk on TE!
+				# for ii in map_here:
+				# 	if map_here[ii]==ss:
+				# 		DerLocal[:,[ii,ii+2]]=0.0
+
+				# Derivatives w.r.t. vv ring vertices are always zero except
+				# when at the bound/wake interface. In 2D problems, when this
+				# happens, zeta01 will have a non-zero contribution
+				for ii in range(Ndim):
+					kkvec=map_here[ii]==self.S0.Map_bw[:,1]
+					if any(kkvec):
+						pos_bound,pos_wake=self.S0.Map_bw[kkvec].reshape((2,))
+						Der[:,ss,0,pos_bound]=Der[:,ss,0,pos_bound]+\
+						                                          DerLocal[:,ii]
+						Der[:,ss,1,pos_bound]=Der[:,ss,1,pos_bound]+\
+						                                        DerLocal[:,ii+2]
+
+				# allocate partial derivatives w.r.t. ss segment vertex
+				Der[:,ss,0,ss]=Der[:,ss,0,ss]+DerLocal[:,4]+DerLocal[:,5]
+				Der[:,ss,1,ss]=Der[:,ss,1,ss]+DerLocal[:,6]+DerLocal[:,7]
+
+		# Project over lattice grid
+		Iseg,Icoll=self.S0.get_force_matrices()
+		for ii in range(Ndim):
+			for jj in range(Ndim):
+				DerOut[ii,:,jj,:]=np.dot(Iseg,Der[ii,:,jj,:]) 
+
+		return DerOut
+
+
+
+
+	def der_Fjouk_dZeta_vind_by_gamma(self):
+		'''
+		Derivative of Joukovski force w.r.t. changes of induced velocity at
+		each segment associated to grid coordinates variations.
+		'''
+
+		Ndim=2
+		K=self.S0.K
+		M=self.S0.M
+		Mw=self.S0.Mw
+
+		Der=np.zeros((Ndim,M,Ndim,K))
+		DerOut=np.zeros((Ndim,K,Ndim,K))
+
+
+		# loop segments where force is computed
+		for ss in range(M):
+			# warning: ss is both segment number and vertex number. In 3D these 
+			# will be different
+
+			# extract vertex coordinates (segment where force is computed)
+			zeta_c=self.S0.Zeta[ss,:]
+
+			# loop through the segments producing velocity
+			for tt in range(M):
+
+				# neglect self-infuced velocity contribution
+				if tt==ss:
+					continue
+
+				# position of segment producing velocity
+				zeta01=self.S0.Zeta[tt,:]
+				### Derivative of total induced velocity of ring tt
+				cf=0.5/np.pi
+				DerLocal=libder.der_Fjouk_ind_zeta_by_gamma(
+					    zeta01=zeta01,zetaC=zeta_c,CF=cf,
+							 gamma01=self.S0.gamma[tt],gammaC=self.S0.gamma[ss])
+				# allocate partial derivatives w.r.t. tt seg.
+				Der[:,ss,0,tt]=Der[:,ss,0,tt]+DerLocal[:,2]
+				Der[:,ss,1,tt]=Der[:,ss,1,tt]+DerLocal[:,3]
+				# allocate partial derivatives w.r.t. ss segment vertex
+				Der[:,ss,0,ss]=Der[:,ss,0,ss]+DerLocal[:,0]
+				Der[:,ss,1,ss]=Der[:,ss,1,ss]+DerLocal[:,1]
+
+
+			# loop through wake vortex segment - last neglected as tt=0 is T.E.
+			for tt in range(Mw):
+				## no need to neglect tt=0 (T.E.) as force not computed
+				#if tt==0: continue
+
+				# position of segment producing velocity
+				zeta01=self.S0.ZetaW[tt,:]
+
+				### Derivative of total induced velocity of ring tt
+				cf=0.5/np.pi
+				DerLocal=libder.der_Fjouk_ind_zeta_by_gamma(
+						zeta01=zeta01,zetaC=zeta_c,CF=cf,
+					        gamma01=self.S0.gammaW[tt],gammaC=self.S0.gamma[ss])
+
+				# Derivatives w.r.t. tt ring vertices are always zero except
+				# when at the bound/wake interface (TE). In 2D problems, when 
+				# this happens, zeta01 will have a non-zero contribution
+				if tt in self.S0.Map_bw[:,1]:
+					print('ss=%.2d tt=%.2d adding TE!' %(ss,tt))
+					kk=np.where(tt==self.S0.Map_bw[:,1])[0][0]
+					pos_bound=self.S0.Map_bw[kk,0]
+					Der[:,ss,0,pos_bound]=Der[:,ss,0,pos_bound]+DerLocal[:,2]
+					Der[:,ss,1,pos_bound]=Der[:,ss,1,pos_bound]+DerLocal[:,3]
+
+				# allocate partial derivatives w.r.t. ss segment vertex
+				Der[:,ss,0,ss]=Der[:,ss,0,ss]+DerLocal[:,0]
+				Der[:,ss,1,ss]=Der[:,ss,1,ss]+DerLocal[:,1]
+
+		# Project over lattice grid
+		Iseg,Icoll=self.S0.get_force_matrices()
+		for ii in range(Ndim):
+			for jj in range(Ndim):
+				DerOut[ii,:,jj,:]=np.dot(Iseg,Der[ii,:,jj,:]) 
+
+		return DerOut
+
+
+
 	def nondimvars(self):
 		'''
 		Nondimensionalise variables of solver.
@@ -372,7 +647,7 @@ class solver():#uvlm2d_sta.solver):
 		self.Wzeta=self.Wzeta/S0.Uabs
 
 		# Output
-		self.FmatSta=self.FmatSta/S0.Fref
+		self.Faero=self.Faero/S0.Fref
 
 		# Other: collocation points and normals
 		self.Zeta_c=self.Zeta_c/S0.b
@@ -399,7 +674,7 @@ class solver():#uvlm2d_sta.solver):
 		self.Wzeta=self.Wzeta*S0.Uabs
 
 		# Output
-		self.FmatSta=self.FmatSta*S0.Fref
+		self.Faero=self.Faero*S0.Fref
 
 		# Other: collocation points and normals
 		self.Zeta_c=self.Zeta_c*S0.b

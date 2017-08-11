@@ -9,6 +9,7 @@ note: formula derived in sympy. see src/delop/linsym*.py modules
 '''
 
 import numpy as np
+from IPython import embed
 
 
 def der_WncV_dZeta(zeta01_x,zeta02_x,zeta01_y,zeta02_y,V0_x,V0_y):
@@ -104,14 +105,118 @@ def der_Wnc0AGamma_dZeta(zeta01,zeta02,zetaA,zetaB,zetaC,nvec,CF,gamma,
 
 def der_NormalArea_dZeta(zeta01,zeta02,dGamma):
 	'''
-	This is one of the 2 terms composing the added mass. This term does not
-	depend on the coordinates of the element, so the input variables zeta01,02 
-	(the coordinates of the element vertices) are ficticious. 
-	- dGamma is the time derivative of circulation change at the ring.
+	This is one of the 2 terms composing the added mass. As it does not depend on 
+	the elements coordinates, so the input variables zeta01,02 are ficticious. 
+	dGamma is the time derivative of circulation change at the ring.
 	'''
 
-	Der=-dGamma*np.array([[0., 0., 1., -1.], 
+	Der=-dGamma*np.array([[ 0., 0., 1.,-1.], 
 		                  [-1., 1., 0., 0.]])
 
 	return Der
 
+
+def der_Fjouk_ind_zeta(zeta01,zeta02,zetaCA,zetaCB,CF,Gamma,gamma_s,allring=True):
+	'''
+	Derivatives of force due to the induced velocity at a segment of vertex 
+	zetaCA=zetaCB. Only the constribution associated to vortex Gamma is included. 
+	gamma_s is the net vorticity at the segment, which is assumed to be constant.
+
+	If zeta01=zetaCA, the corresponding derivatives have infinite value.
+
+	Details: src/develop/linsym_fjouk_ind.py
+	'''
+
+	R01=zetaCA-zeta01
+	R02=zetaCB-zeta02
+
+	### avoid warning messages:
+	# when R01 or R02 are zero, the derivatives are discarded - as they have
+	# infinite value. To avoid issuing a warning, zero is replaced by a very 
+	# small number. 
+	if np.linalg.norm(R01)<1e-16: R01=(1.+1e-15)*zetaCA-zeta01
+	if np.linalg.norm(R02)<1e-16: R02=(1.+1e-15)*zetaCB-zeta02
+
+	R01_x,R01_y=R01
+	R02_x,R02_y=R02
+
+	R01sq=np.sum(R01**2)
+	R02sq=np.sum(R02**2)
+
+
+	if allring:
+		Der=np.array([[
+			CF*Gamma*gamma_s*(2*R01_x**2 - R01sq)/R01sq**2, 
+		   -CF*Gamma*gamma_s*(2*R02_x**2 - R02sq)/R02sq**2, 
+		  2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		 -2*CF*Gamma*R02_x*R02_y*gamma_s/R02sq**2, 
+		   -CF*Gamma*gamma_s*(2*R01_x**2 - R01sq)/R01sq**2, 
+		    CF*Gamma*gamma_s*(2*R02_x**2 - R02sq)/R02sq**2, 
+		 -2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		  2*CF*Gamma*R02_x*R02_y*gamma_s/R02sq**2
+		  ],[
+		  2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		 -2*CF*Gamma*R02_x*R02_y*gamma_s/R02sq**2, 
+		    CF*Gamma*gamma_s*(2*R01_y**2 - R01sq)/R01sq**2, 
+		   -CF*Gamma*gamma_s*(2*R02_y**2 - R02sq)/R02sq**2, 
+		 -2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		  2*CF*Gamma*R02_x*R02_y*gamma_s/R02sq**2, 
+		   -CF*Gamma*gamma_s*(2*R01_y**2 - R01sq)/R01sq**2, 
+		    CF*Gamma*gamma_s*(2*R02_y**2 - R02sq)/R02sq**2
+		    ]])
+	else: # contribution of segment 1 only
+		Der=np.array([[
+			CF*Gamma*gamma_s*(R01_x**2 - R01_y**2)/R01sq**2, 
+		    0, 
+		  2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		    0, 
+		   -CF*Gamma*gamma_s*(R01_x**2 - R01_y**2)/R01sq**2, 
+		    0, 
+		 -2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		    0
+		  ],[
+		  2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		    0, 
+		   -CF*Gamma*gamma_s*(R01_x**2 - R01_y**2)/R01sq**2, 
+		    0, 
+		 -2*CF*Gamma*R01_x*R01_y*gamma_s/R01sq**2, 
+		    0, 
+		    CF*Gamma*gamma_s*(R01_x**2 - R01_y**2)/R01sq**2, 
+		    0]])
+
+	return Der
+
+
+
+def der_Fjouk_ind_zeta_by_gamma(zeta01,zetaC,CF,gamma01,gammaC):
+	'''
+	Derivatives of force at vertex zetaC due to the induced velocity produced by
+	segment zeta01. gamma01 and gammaC are the net vorticity at the segments.
+
+	Details: src/develop/linsym_fjouk_ind_bygamma.py
+	'''
+
+	R01=zetaC-zeta01
+
+	### avoid warning messages:
+	# when R01 or R02 are zero, the derivatives are discarded - as they have
+	# infinite value. To avoid issuing a warning, zero is replaced by a very 
+	# small number. 
+	if np.linalg.norm(R01)<1e-16: R01=(1.+1e-15)*zetaC-zeta01
+
+	R01_x,R01_y=R01
+	R01sq=np.sum(R01**2)
+
+	Der=-np.array([[
+			CF*gamma01*gammaC*(2*R01_x**2 - R01sq)/R01sq**2, 
+		  2*CF*R01_x*R01_y*gamma01*gammaC/R01sq**2, 
+		   -CF*gamma01*gammaC*(2*R01_x**2 - R01sq)/R01sq**2, 
+		 -2*CF*R01_x*R01_y*gamma01*gammaC/R01sq**2
+		 ],[
+		  2*CF*R01_x*R01_y*gamma01*gammaC/R01sq**2, 
+		    CF*gamma01*gammaC*(2*R01_y**2 - R01sq)/R01sq**2, 
+		 -2*CF*R01_x*R01_y*gamma01*gammaC/R01sq**2,
+		   -CF*gamma01*gammaC*(2*R01_y**2 - R01sq)/R01sq**2
+		]])
+
+	return Der

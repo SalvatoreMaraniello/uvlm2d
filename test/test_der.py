@@ -155,14 +155,6 @@ class Test_der_sta(unittest.TestCase):
 		S0.Gamma=np.linspace(3,3*S0.M,S0.M)
 		S0.GammaW=np.linspace(2,2*S0.Mw,S0.Mw)
 
-		### apply random scaling - ok
-		# S0.Zeta=S0.Zeta
-		# S0.get_Wmats()
-		# # update collocation points
-		# S0.Zeta_c=np.dot(S0._Wcv,S0.Zeta)  
-		# # compute induced velocity
-		# S0.build_AIC_Gamma2d()
-
 		# Compute Induced velocity (3 comp) at collocation points
 		#Vind_bound=np.zeros((M,Ndim))
 		#Vind_bound[:,0]=np.dot(S0.AA[0,:,:],S0.Gamma)
@@ -218,14 +210,331 @@ class Test_der_sta(unittest.TestCase):
 		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
 		errW_max,EWabs,EWrel=max_error_tensor(PderW_an,PderW_num)
 
-
-		tol=5.*FDstep
+		tol=10.*FDstep # increased tolerance: max. error from almost zero term
 		assert err_max<tol,\
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
 		assert errW_max<tol,\
 			 'Wake maximum error %.2e larger than tolerance %.2e'%(errW_max,tol)
 
 
+
+	def test_der_Fjouk_dZeta_vind_all(self):
+		'''
+		Test lin_uvlm2d_sta.solver.der_Fjouk_dZeta_vind AND
+		lin_uvlm2d_sta.der_Fjouk_dZeta_vind_by_gamma against FD.
+
+		@warning: variables should be normalised!
+		'''
+
+		S0,Slin=self.Slin.S0,self.Slin
+		M,Mw,K=S0.M,S0.Mw,S0.K
+		Ndim=2
+		S0.nondimvars()
+
+		# redefine circulation
+		S0.Gamma=np.array([1.2*(ii-0.7)*(ii+1) for ii in range(M)])
+		S0.GammaW=np.array([2.3*(ii-0.3)*(ii+1.5) for ii in range(Mw)])
+		
+
+		S0.gamma=np.dot(S0._TgG,S0.Gamma)
+		S0.gammaW=np.dot(S0._TgG_w,S0.GammaW)+np.dot(S0._EgG,S0.Gamma)
+
+		# update induced/total velocity
+		S0.get_induced_velocity()
+		Vind_zeta=S0.Vind_zeta.copy()
+		Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+
+		# Analytical derivatives
+		Pder_an=Slin.der_Fjouk_dZeta_vind()
+		PderG_an=Slin.der_Fjouk_dZeta_vind_by_gamma()
+		Iseg,Icoll=Slin.S0.get_force_matrices()
+
+		# Force Joukovski at segments
+		for nn in range(M):
+			S0.Faero[nn,:]=-S0.gamma[nn]*\
+			                        np.array([-Vtot_zeta[nn,1],Vtot_zeta[nn,0]])
+		# Force Joukovski at grid
+		Fgrid=S0.Faero.copy()
+
+		# store reference value
+		gamma=S0.gamma.copy()
+		Gamma=S0.Gamma.copy()
+		Zeta=S0.Zeta.copy()
+		ZetaW=S0.ZetaW.copy()
+
+		# Go FDs!
+		FDstep=1e-6
+		Pder_num=np.zeros((Ndim,K,Ndim,K))
+
+		for kk in range(K):
+			for dd in range(Ndim):
+
+				# reset grid
+				S0.Zeta=Zeta.copy()
+				S0.ZetaW=ZetaW.copy()
+
+				# Perturb grid
+				S0.Zeta[kk,dd]+=FDstep
+				if kk==S0.K-1:
+					S0.ZetaW[0,dd]+=FDstep
+
+				# compute induced velocity
+				S0.get_induced_velocity()
+				S0.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+
+				# Force Joukovski at segments
+				for nn in range(M):
+					S0.Faero[nn,:]=-S0.gamma[nn]*\
+					          np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+				# Force Joukovski at grid
+				Fgrid_here=S0.Faero
+
+				# get derivative
+				for ii in range(Ndim):
+					Pder_num[ii,:,dd,kk]=(Fgrid_here[:,ii]-Fgrid[:,ii])/FDstep
+
+		# check maximum error
+		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
+		errG_max,EabsG,ErelG=max_error_tensor(PderG_an,Pder_num)
+
+		tol=50.*FDstep # increased tolerance: max. error from almost zero term
+		assert err_max<tol,\
+			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
+		assert errG_max<tol,\
+			 'Wake maximum error %.2e larger than tolerance %.2e'%(errW_max,tol)
+
+
+
+
+	def test_der_Fjouk_dV(self):
+		'''
+		Test lin_uvlm2d_sta.solver.der_Fjouk_dV against FD.
+
+		@warning: variables should be normalised!
+		'''
+
+		S0,Slin=self.S0,self.Slin
+		M,Mw,K=S0.M,S0.Mw,S0.K
+		Ndim=2
+		S0.nondimvars()
+
+		# redefine circulation
+		S0.Gamma=np.array([1.2*(ii-0.7)*(ii+1) for ii in range(M)])
+		S0.GammaW=np.array([2.3*(ii-0.3)*(ii+1.5) for ii in range(Mw)])
+		S0.gamma=np.dot(S0._TgG,S0.Gamma)
+		S0.gammaW=np.dot(S0._TgG_w,S0.GammaW)+np.dot(S0._EgG,S0.Gamma)
+
+		# Analytical derivative
+		Pder_an=Slin.der_Fjouk_dV()
+		Iseg,Icoll=Slin.S0.get_force_matrices()
+
+		### Numerical derivatives:
+		# reference values
+		S0.get_induced_velocity()
+		S0.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+		# Force Joukovski at segments
+		for nn in range(M):
+			S0.Faero[nn,:]=-S0.gamma[nn]*\
+			          np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+		# Force Joukovski at grid
+		Fgrid=S0.Faero.copy()
+		# store reference value
+		Vtot_zeta=S0.Vtot_zeta.copy()
+		Wzeta=S0.Wzeta.copy()
+		dZetadt=S0.dZetadt.copy()
+
+		FDstep=1e-6
+		Pder_num=np.zeros((Ndim,K,Ndim,K))
+		for kk in range(K):
+			for dd in range(Ndim):
+				# reset grid
+				S0.Wzeta=Wzeta.copy()
+				S0.dZetadt=dZetadt.copy()
+				# Perturb grid
+				S0.Wzeta[kk,dd]+=FDstep
+				#S0.dZetadt[kk,dd]==FDstep
+				# Total velocity
+				S0.get_induced_velocity()
+				S0.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+				# Force Joukovski at segments
+				for nn in range(M):
+					S0.Faero[nn,:]=-S0.gamma[nn]*\
+					          np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+				# Force Joukovski at grid
+				Fgrid_here=S0.Faero
+				for ff in range(Ndim):
+					Pder_num[ff,:,dd,kk]=(Fgrid_here[:,ff]-Fgrid[:,ff])/FDstep
+
+		# check maximum error
+		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
+
+		#embed()
+		tol=5.*FDstep
+		assert err_max<tol,\
+			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
+
+
+
+	def test_der_Fjouk_dGamma_vtot0(self):
+		'''
+		Test lin_uvlm2d_sta.solver.der_Fjouk_dGamma_vtot0 against FD.
+
+		@warning: variables should be normalised!
+		'''
+
+		S0,Slin=self.Slin.S0,self.Slin
+		M,Mw,K=S0.M,S0.Mw,S0.K
+		Ndim=2
+		S0.nondimvars()
+
+		# redefine circulation
+		S0.Gamma=np.array([1.2*(ii-0.7)*(ii+1) for ii in range(M)])
+		S0.GammaW=np.array([2.3*(ii-0.3)*(ii+1.5) for ii in range(Mw)])
+		S0.gamma=np.dot(S0._TgG,S0.Gamma)
+		S0.gammaW=np.dot(S0._TgG_w,S0.GammaW)+np.dot(S0._EgG,S0.Gamma)
+
+		# update induced/total velocity
+		S0.get_induced_velocity()
+		S0.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+
+		# Analytical derivative
+		Pder_an=Slin.der_Fjouk_dGamma_vtot0()
+		Iseg,Icoll=Slin.S0.get_force_matrices()
+
+		# Force Joukovski at segments
+		for nn in range(M):
+			S0.Faero[nn,:]=-S0.gamma[nn]*\
+			                  np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+		# Force Joukovski at grid
+		Fgrid=S0.Faero.copy()
+		# store reference value
+		gamma=S0.gamma.copy()
+		Gamma=S0.Gamma.copy()
+
+		FDstep=1e-6
+		Pder_num=np.zeros((Ndim,K,M))
+		for mm in range(M):
+
+			# reset grid
+			S0.Gamma=Gamma.copy()
+			# Perturb grid
+			S0.Gamma[mm]+=FDstep
+			# Force Joukovski at segments
+			S0.gamma=np.dot(S0._TgG,S0.Gamma)
+			S0.Faero[:,:]=0.0
+			for nn in range(M):
+				S0.Faero[nn,:]=-S0.gamma[nn]*\
+				              np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+			# Force Joukovski at grid
+			Fgrid_here=S0.Faero
+			for ff in range(Ndim):
+				Pder_num[ff,:,mm]=(Fgrid_here[:,ff]-Fgrid[:,ff])/FDstep
+
+		# check maximum error
+		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
+
+		tol=5.*FDstep
+		assert err_max<tol,\
+			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
+
+
+	def test_der_Fjouk_dGamma_vind(self):
+		'''
+		Test lin_uvlm2d_sta.solver.der_Fjouk_dGamma_vind against FD.
+
+		@warning: variables should be normalised!
+		'''
+
+		S0,Slin=self.Slin.S0,self.Slin
+		M,Mw,K=S0.M,S0.Mw,S0.K
+		Ndim=2
+		S0.nondimvars()
+
+		# redefine circulation
+		S0.Gamma=np.array([1.2*(ii-0.7)*(ii+1) for ii in range(M)])
+		S0.GammaW=np.array([2.3*(ii-0.3)*(ii+1.5) for ii in range(Mw)])
+		S0.gamma=np.dot(S0._TgG,S0.Gamma)
+		S0.gammaW=np.dot(S0._TgG_w,S0.GammaW)+np.dot(S0._EgG,S0.Gamma)
+
+		# update induced/total velocity
+		S0.get_induced_velocity()
+		Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+
+		# Analytical derivative
+		Pder_an,PderW_an=Slin.der_Fjouk_dGamma_vind()
+		Iseg,Icoll=Slin.S0.get_force_matrices()
+
+		# Force Joukovski at segments
+		for nn in range(M):
+			S0.Faero[nn,:]=-S0.gamma[nn]*\
+			                        np.array([-Vtot_zeta[nn,1],Vtot_zeta[nn,0]])
+		# Force Joukovski at grid
+		Fgrid=S0.Faero.copy()
+		# store reference value
+		gamma=S0.gamma.copy()
+		Gamma=S0.Gamma.copy()
+		GammaW=S0.GammaW.copy()
+
+		FDstep=1e-6
+
+		# bound term
+		Pder_num=np.zeros((Ndim,K,M))
+		for mm in range(M):
+			# reset circ
+			S0.Gamma=Gamma.copy()
+			S0.GammaW=GammaW.copy()
+			# Perturb circ
+			S0.Gamma[mm]+=FDstep
+
+			S0.gamma=np.dot(S0._TgG,S0.Gamma)
+			S0.gammaW=np.dot(S0._TgG_w,S0.GammaW)+np.dot(S0._EgG,S0.Gamma)
+			#S0.gamma[mm]+=FDstep
+
+			S0.get_induced_velocity()
+			S0.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+
+			for nn in range(M):
+				S0.Faero[nn,:]=-gamma[nn]*\
+				              np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+			# Force Joukovski at grid
+			Fgrid_here=S0.Faero
+			for ff in range(Ndim):
+				Pder_num[ff,:,mm]=(Fgrid_here[:,ff]-Fgrid[:,ff])/FDstep
+
+		# wake term
+		PderW_num=np.zeros((Ndim,K,Mw))
+		for mm in range(Mw):
+			# reset circ
+			S0.Gamma=Gamma.copy()
+			S0.GammaW=GammaW.copy()
+			# Perturb circ
+			S0.GammaW[mm]+=FDstep
+
+			S0.gamma=np.dot(S0._TgG,S0.Gamma)
+			S0.gammaW=np.dot(S0._TgG_w,S0.GammaW)+np.dot(S0._EgG,S0.Gamma)
+			#S0.gammaW[mm]+=FDstep
+
+			S0.get_induced_velocity()
+			S0.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt+S0.Vind_zeta
+
+			for nn in range(M):
+				S0.Faero[nn,:]=-gamma[nn]*\
+				              np.array([-S0.Vtot_zeta[nn,1],S0.Vtot_zeta[nn,0]])
+			# Force Joukovski at grid
+			Fgrid_here=S0.Faero
+			for ff in range(Ndim):
+				PderW_num[ff,:,mm]=(Fgrid_here[:,ff]-Fgrid[:,ff])/FDstep
+
+
+		# check maximum error
+		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
+		errW_max,EabsW,ErelW=max_error_tensor(PderW_an,PderW_num)
+
+		tol=5.*FDstep
+		assert err_max<tol,\
+			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
+		assert errW_max<tol,\
+			 'Wake maximum error %.2e larger than tolerance %.2e'%(errW_max,tol)
 
 
 
@@ -282,7 +591,6 @@ class Test_der_dyn(unittest.TestCase):
 
 
 		### Numerical derivatives:
-
 		# reference values
 		Zeta=S0.Zeta.copy()
 		Fmass=np.zeros((M,Ndim))
@@ -385,8 +693,6 @@ class Test_der_dyn(unittest.TestCase):
 		# check maximum error
 		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
 
-		embed()
-
 		tol=5.*FDstep
 		assert err_max<tol,\
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
@@ -397,18 +703,26 @@ class Test_der_dyn(unittest.TestCase):
 if __name__=='__main__':
 
 	### Static terms
-	#T=Test_der_sta()
-	#T.setUp()
+	T=Test_der_sta()
+	T.setUp()
+	unittest.main()
 
-	# # Derivatives check
+	## Induced velocity
 	#T.test_der_WncV_dZeta()
 	#T.test_der_Wnc0AGamma_dZeta()
+
+	## Joukovski force
+	#T.test_der_Fjouk_dV()
+	#T.test_der_Fjouk_dGamma_vtot0()
+	#T.test_der_Fjouk_dGamma_vind()
+	#T.test_der_Fjouk_dZeta_vind_all()
 
 
 	### Dynamic terms
 	T=Test_der_dyn()
 	T.setUp()
+	unittest.main()
 
-	# # Derivatives check
+	# Added mass
 	#T.test_der_Fmass_dZeta()
-	T.test_der_Fmass_dGammadt()
+	#T.test_der_Fmass_dGammadt()

@@ -79,12 +79,6 @@ class solver(lin_uvlm2d_sta.solver):
 
 		# # Other
 		# self.THVtot_zeta=np.zeros((self.NT,self.K,Ndim))
-		#
-		# # instanteneous velocities at wake
-		# self.WzetaW=np.zeros((self.Kw,Ndim))   # gust
-		# self.UzetaW = np.zeros((self.Kw,Ndim)) # background
-		# for nn in range(self.Kw): 
-		# 	self.UzetaW[nn,:]=self.Uinf
 
 		# Hall's correction: 
 		# regulates the dissipation of last vortex: 
@@ -102,26 +96,9 @@ class solver(lin_uvlm2d_sta.solver):
 		# Prepare Input/Output classes
 		self.SolDyn=save.Output('sollindyn')
 		self.SolDyn.Param=save.Output('params')
-		self.SolDyn.Param.drop(dt=self.dt,T=self.T,time=self.time,
-											  NT=self.NT,eps_Hall=self.eps_Hall)
 		self.SolDyn.Input=save.Output('input')
-		self.SolDyn.Input.drop(THZeta=self.THZeta,
-			                      THdZetadt=self.THdZetadt,THWzeta=self.THWzeta)
 		self.SolDyn.State=save.Output('state')
-		self.SolDyn.State.drop(THGamma=self.THGamma,THGammaW=self.THGammaW,
-			                                         THdGammadt=self.THdGammadt)
 		self.SolDyn.Output=save.Output('output')
-		self.SolDyn.Output.drop(THFaero=self.THFaero,THFaero_m=self.THFaero_m,
-			                                             THFdistr=self.THFdistr)
-
-
-
-		'''
-		Params=[S0.M,S0.Mw,S0.K,S0.Kw,
-		        S0.b,S0.alpha,S0.Uinf,S0.rho,S0.qinf,
-				S0.perc_ring,S0.perc_coll,S0.perc_interp,
-		'''
-
 
 
 	def get_Cgamma_matrices(self):
@@ -160,27 +137,6 @@ class solver(lin_uvlm2d_sta.solver):
 		return Czeta, CzetaW
 
 
-
-	def get_force_matrices(self):
-		''' Produce matrices to interpolate the force from segments and 
-		collocation points to grid points '''
-
-
-		M,K=self.S0.M,self.S0.K
-		Iseg=np.zeros((K,M))
-		Icoll=np.zeros((K,M))
-
-		Iseg[:M,:]=np.eye(M)
-		#Icoll
-		wvcoll=np.zeros((K,))
-		wvcoll[0]=1.-self.S0.perc_interp 
-		wvcoll[1]=self.S0.perc_interp 
-		Icoll=scalg.circulant(wvcoll)[:,:M]
-
-		return Iseg, Icoll
-
-
-
 	def solve_dyn_Gamma2d(self):
 		'''
 		In this method, the wake is assumed to be frozen (for the purpose of 
@@ -213,7 +169,7 @@ class solver(lin_uvlm2d_sta.solver):
 		# convection wake coordinates
 		Czeta,CzetaW=self.get_Czeta_matrices()
 		# force interpolation
-		Iseg,Icoll=self.get_force_matrices()
+		Iseg,Icoll=S0.get_force_matrices()
 
 
 		### steady solution
@@ -238,7 +194,7 @@ class solver(lin_uvlm2d_sta.solver):
 			self.gamma[:]=0.
 			self.GammaW[:]=0.
 			self.gammaW[:]=0.
-			self.FmatSta[:,:]=0.0
+			self.Faero[:,:]=0.0
 
 
 		### store t=0 state/output: 
@@ -248,7 +204,8 @@ class solver(lin_uvlm2d_sta.solver):
 		self.THGamma[0,:]=self.Gamma
 		self.THGammaW[0,:]=self.GammaW
 		self.THdGammadt[0,:]=self.dGammadt 
-		self.THFaero[0,:]=self.FmatSta.sum(0)		
+		self.THFaero[0,:]=self.Faero.sum(0)		
+		self.THFdistr[0,:,:]=self.Faero.copy()
 
 		self.Xnew=[]
 
@@ -289,23 +246,55 @@ class solver(lin_uvlm2d_sta.solver):
 		Ass=scalg.lu_solve( (LU,P), Fss)
 		Bss=scalg.lu_solve( (LU,P), Gss)
 
-		#Ess1=Ess[:M,:]
-		#Fss1=Fss[:M,:]
-		#Gss1=Gss[:M,:]
-		#Ass1=Ass[:M,:]
-		#Bss1=Bss[:M,:]
 
+		### Output matrices - To be completed
+		Ny=2*K
+		Css_m=np.zeros((Ny,Nx))
+		Dss_m=np.zeros((Ny,Nu))
+		Css_j=np.zeros((Ny,Nx))
+		Dss_j=np.zeros((Ny,Nu))
+		
 
-		# Output matrices - To be completed
-		Css=np.eye(Nx)
-		Dss=np.zeros((Nx,Nu))
+		### circulatory terms
+		Css_j[:K,:M]=self.DFj_dGamma[0,:,:]
+		Css_j[K:,:M]=self.DFj_dGamma[1,:,:]
+		Css_j[:K,M:M+Mw]=self.DFj_dGammaW[0,:,:]
+		Css_j[K:,M:M+Mw]=self.DFj_dGammaW[1,:,:]
 
+		Dss_j[:K,:K]   =self.DFj_dZeta[0,:,0,:]
+		Dss_j[:K,K:2*K]=self.DFj_dZeta[0,:,1,:]
+		Dss_j[K:,:K]   =self.DFj_dZeta[1,:,0,:]
+		Dss_j[K:,K:2*K]=self.DFj_dZeta[1,:,1,:]
+
+		Dss_j[:K,2*K:3*K]=-self.DFj_dV[0,:,0,:]
+		Dss_j[:K,3*K:4*K]=-self.DFj_dV[0,:,1,:]
+		Dss_j[K:,2*K:3*K]=-self.DFj_dV[1,:,0,:]
+		Dss_j[K:,3*K:4*K]=-self.DFj_dV[1,:,1,:]		
+
+		Dss_j[:K,4*K:5*K]=self.DFj_dV[0,:,0,:]
+		Dss_j[:K,5*K:6*K]=self.DFj_dV[0,:,1,:]
+		Dss_j[K:,4*K:5*K]=self.DFj_dV[1,:,0,:]
+		Dss_j[K:,5*K:6*K]=self.DFj_dV[1,:,1,:]	
+
+		### added mass terms
+		# der Fmass w.r.t. dGammadt
+		DFm_dGammadt=self.der_Fmass_dGammadt()
+		Css_m[:K,M+Mw:2*M+Mw]=np.dot(Icoll,DFm_dGammadt[0,:,:]) # force x
+		Css_m[K:,M+Mw:2*M+Mw]=np.dot(Icoll,DFm_dGammadt[1,:,:]) # force y
+		# der Fmass w.r.t. Zeta
+		DFm_dZeta=self.der_Fmass_dZeta()
+		Dss_m[:K,:K]=np.dot(Icoll,DFm_dZeta[0,:,0,:]) # force x w.r.t. x displ.
+		Dss_m[:K,K:2*K]=np.dot(Icoll,DFm_dZeta[0,:,1,:]) # force x w.r.t. y displ.
+		Dss_m[K:,:K]=np.dot(Icoll,DFm_dZeta[1,:,0,:]) # force y w.r.t. x displ.
+		Dss_m[K:,K:2*K]=np.dot(Icoll,DFm_dZeta[1,:,1,:]) # force y w.r.t. y displ.
+
+		#embed()
 
 		### Time-stepping
 		xold=np.concatenate( (self.Gamma,self.GammaW,self.dGammadt) )
 
 		for tt in range(1,NT):
-			print('step: %.6d of %.6d'%(tt,NT))
+			print('step: %.6d of %.6d'%(tt+1,NT))
 
 			# define new input
 			unew=np.concatenate((
@@ -333,52 +322,17 @@ class solver(lin_uvlm2d_sta.solver):
 			self.THgammaW[tt,:]=np.dot(S0._TgG_w,self.THGammaW[tt,:])\
 											 +np.dot(S0._EgG,self.THGamma[tt,:])
 
-
-			### compute force
-
-			# Total Vorticity
-			self.GammaTot=S0.Gamma+self.THGamma[tt,:]
-			self.GammaWTot=S0.GammaW+self.THGammaW[tt,:]
-			self.gammaTot=S0.gamma+self.THgamma[tt,:]
-			self.gammaWTot=S0.gammaW+self.THgammaW[tt,:]
-
-
-			# Total deformations (wake only changed at bound/wake interface)
-			self.ZetaTot=S0.Zeta+self.THZeta[tt,:,:]
-			self.ZetaWTot=S0.ZetaW.copy()
-			self.ZetaWTot[S0.Map_bw[:,1],:]=self.ZetaTot[S0.Map_bw[:,0],:] 
-
-			# induced velocity
-			self.get_total_induced_velocity()
-
-			# total velocity
-			self.Vtot_zeta=S0.Uzeta+S0.Wzeta-S0.dZetadt\
-				  +self.THWzeta[tt,:,:]-self.THdZetadt[tt,:,:]+self.VindTot_zeta
-
-			# Force - Joukovski
-			for nn in range(M):
-				Fjouk[nn,:]=-self.gammaTot[nn]*\
-				          np.array([-self.Vtot_zeta[nn,1],self.Vtot_zeta[nn,0]])
-			# Added mass - collocation points
-			DZeta=np.diff(self.ZetaTot.T).T
-			kcross2D=np.array([[0,-1.],[1,0]])
-			self.Nmat=0.0*S0.Nmat
-			for ii in range(K-1):
-				self.Nmat[ii,:]=np.dot(kcross2D,DZeta[ii,:])/\
-				                                     np.linalg.norm(DZeta[ii,:])
-			for nn in range(M):
-				Fmass[nn,:]=-np.linalg.norm(DZeta[nn,:])*\
-				                          self.THdGammadt[tt,nn]*self.Nmat[nn,:]
-
-
-			# interpolate force over grid
-			Faero_m=np.dot(Icoll,Fmass)
-			self.Fmat=np.dot(Iseg,Fjouk)+Faero_m
+			### Linearised output
+			ynew=np.dot(Css_m,xnew)+np.dot(Dss_m,unew)
+			Faero_m=ynew.reshape((K,2),order='F')
+			ynew=ynew+np.dot(Css_j,xnew)+np.dot(Dss_j,unew)
+			Faero=ynew.reshape((K,2),order='F')
+			### Linearised output
 
 			# store output
-			self.THFaero[tt,:]=self.Fmat.sum(0)
+			self.THFaero[tt,:]=Faero.sum(0)
 			self.THFaero_m[tt,:]=Faero_m.sum(0)
-			self.THFdistr[tt,:,:]=self.Fmat
+			self.THFdistr[tt,:,:]=Faero
 			#self.THVtot_zeta[tt,:,:]=self.Vtot_zeta
 
 		# terminate
@@ -389,9 +343,24 @@ class solver(lin_uvlm2d_sta.solver):
 		self.dimvars()
 		S0.dimvars()
 
-
 		# save:
 		if self._saveout:
+
+			# Prepare Input/Output classes
+			self.SolDyn=save.Output('sollindyn')
+			self.SolDyn.Param=save.Output('params')
+			self.SolDyn.Param.drop(dt=self.dt,T=self.T,time=self.time,
+										      NT=self.NT,eps_Hall=self.eps_Hall)
+			self.SolDyn.Input=save.Output('input')
+			self.SolDyn.Input.drop(THZeta=self.THZeta,
+				                  THdZetadt=self.THdZetadt,THWzeta=self.THWzeta)
+			self.SolDyn.State=save.Output('state')
+			self.SolDyn.State.drop(THGamma=self.THGamma,THGammaW=self.THGammaW,
+				                                     THdGammadt=self.THdGammadt)
+			self.SolDyn.Output=save.Output('output')
+			self.SolDyn.Output.drop(THFaero=self.THFaero,
+				                THFaero_m=self.THFaero_m,THFdistr=self.THFdistr)
+
 			save.h5file(self._savedir,self._savename, *(S0.SolSta,self.SolDyn,))
 
 
@@ -469,7 +438,7 @@ class solver(lin_uvlm2d_sta.solver):
 			Norm=self.S0.Nmat[mm,:]
 
 			# Assembly
-			Der[:,mm,mm]=Der[:,mm,mm]-Area*Norm 
+			Der[:,mm,mm]=Der[:,mm,mm]-Area*Norm
 
 		return Der
 
@@ -574,4 +543,4 @@ if __name__=='__main__':
 	# linearise dynamic
 	T=2.0
 	Slin=solver(S0,T)
-	#Slin.solve_dyn_Gamma2d()
+	Slin.solve_dyn_Gamma2d()
