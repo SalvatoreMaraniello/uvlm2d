@@ -98,7 +98,7 @@ class Test_linsta(unittest.TestCase):
 				# solve
 				Slin.solve_static_Gamma2d()
 				# store data
-				CDlin[aa,mm],CLlin[aa,mm]=np.sum(Slin.FmatSta,0)/\
+				CDlin[aa,mm],CLlin[aa,mm]=np.sum(Slin.Faero,0)/\
 										 (qinf_tot*Slin.S0.chord*(alpha+dalpha))
 
 				### Reference nonlinear solution
@@ -107,7 +107,7 @@ class Test_linsta(unittest.TestCase):
 				# solve
 				Sref.solve_static_Gamma2d()
 				# store
-				CDnnl[aa,mm],CLnnl[aa,mm]=np.sum(Sref.FmatSta,0)/\
+				CDnnl[aa,mm],CLnnl[aa,mm]=np.sum(Sref.Faero,0)/\
 										    (qinf_tot*Sref.chord*(alpha+dalpha))
 
 
@@ -194,7 +194,7 @@ class Test_linsta(unittest.TestCase):
 				# solve
 				Slin.solve_static_Gamma2d()
 				# store data
-				CDlin[aa,mm],CLlin[aa,mm]=np.sum(Slin.FmatSta,0)/\
+				CDlin[aa,mm],CLlin[aa,mm]=np.sum(Slin.Faero,0)/\
 										 (qinf_tot*Slin.S0.chord*(alpha+dalpha))
 
 				### Reference nonlinear solution
@@ -203,7 +203,7 @@ class Test_linsta(unittest.TestCase):
 				# solve
 				Sref.solve_static_Gamma2d()
 				# store
-				CDnnl[aa,mm],CLnnl[aa,mm]=np.sum(Sref.FmatSta,0)/\
+				CDnnl[aa,mm],CLnnl[aa,mm]=np.sum(Sref.Faero,0)/\
 										    (qinf_tot*Sref.chord*(alpha+dalpha))
 
 
@@ -263,10 +263,6 @@ class Test_linsta(unittest.TestCase):
 		Nm,mm=1,0
 		Na=len(DAlphaList)
 
-		CDlin01,CLlin01=np.zeros((Na,Nm)),np.zeros((Na,Nm))
-		CDlin02,CLlin02=np.zeros((Na,Nm)),np.zeros((Na,Nm))
-		CDnnl,CLnnl=np.zeros((Na,Nm)),np.zeros((Na,Nm))
-
 		Llin01,Dlin01=np.zeros((Na,Nm)),np.zeros((Na,Nm))
 		Llin02,Dlin02=np.zeros((Na,Nm)),np.zeros((Na,Nm))
 		Lnnl,Dnnl=np.zeros((Na,Nm)),np.zeros((Na,Nm))
@@ -284,13 +280,14 @@ class Test_linsta(unittest.TestCase):
 		S01=uvlm.solver(M,Mw,b,Uinf,alpha01,rho=1.225)
 		S01.build_camber_plate(Mcamb=10,Pcamb=4)
 		S01.solve_static_Gamma2d()
-		Ftot0=np.sum(S01.FmatSta,0)
+		Fref01=np.sum(S01.Faero,0)
 
 		# reference condition 2: aerofoil at 10 deg angle
 		alpha02=10.*np.pi/180.
 		S02=uvlm.solver(M,Mw,b,Uinf,alpha02,rho=1.225)
 		S02.build_camber_plate(Mcamb=10,Pcamb=4)
 		S02.solve_static_Gamma2d()
+		Fref02=np.sum(S02.Faero,0)
 
 
 		print('Testing steady aerofoil for M=%d...' %M)
@@ -303,7 +300,6 @@ class Test_linsta(unittest.TestCase):
 			qinf_tot=0.5*rho*(S01.Uabs+dUinf)**2
 			print('\talpha==%.2f deg' %DAlphaList[aa])
 
-
 			### Linearised solution 01:
 			# Perturb reference state
 			dalpha01=alpha_tot-alpha01 # angle [rad]
@@ -314,11 +310,8 @@ class Test_linsta(unittest.TestCase):
 			# solve
 			Slin01.solve_static_Gamma2d()
 			# store data
-			Dlin01[aa,mm],Llin01[aa,mm]=np.sum(Slin01.FmatSta,0)
-			dFtot01=np.sum(Slin01.FmatSta,0)-Ftot0
-			CDlin01[aa,mm],CLlin01[aa,mm]=dFtot01/\
-			                            (qinf_tot*Slin01.S0.chord*alpha_tot)
-
+			dFtot01=np.sum(Slin01.Faero,0)
+			Dlin01[aa,mm],Llin01[aa,mm]=dFtot01+Fref01
 
 			### Linearised solution 02:
 			# Perturb reference state
@@ -330,11 +323,8 @@ class Test_linsta(unittest.TestCase):
 			# solve
 			Slin02.solve_static_Gamma2d()
 			# store data
-			Dlin02[aa,mm],Llin02[aa,mm]=np.sum(Slin02.FmatSta,0)
-			dFtot02=np.sum(Slin02.FmatSta,0)-Ftot0
-			CDlin02[aa,mm],CLlin02[aa,mm]=dFtot02/\
-			                            (qinf_tot*Slin02.S0.chord*alpha_tot)
-
+			dFtot02=np.sum(Slin02.Faero,0)
+			Dlin02[aa,mm],Llin02[aa,mm]=dFtot02+Fref02
 
 			### Reference nonlinear solution
 			Sref=uvlm.solver(M,Mw,b,Uinf,alpha_tot,rho)
@@ -342,9 +332,7 @@ class Test_linsta(unittest.TestCase):
 			# solve
 			Sref.solve_static_Gamma2d()
 			# store
-			Dnnl[aa,mm],Lnnl[aa,mm]=np.sum(Sref.FmatSta,0)
-			CDnnl[aa,mm],CLnnl[aa,mm]=np.sum(Sref.FmatSta,0)/\
-			                                 (qinf_tot*Sref.chord*alpha_tot)
+			Dnnl[aa,mm],Lnnl[aa,mm]=np.sum(Sref.Faero,0)
 
 
 		clist=['k','r','b','0.6',]
@@ -354,19 +342,19 @@ class Test_linsta(unittest.TestCase):
 		ax1=fig1.add_subplot(111)
 		ax2=fig2.add_subplot(111)
 
+		ax1.plot(DAlphaList,Dnnl[:,mm],'r',lw=Nm-mm,
+		                                      label=r'M=%.2d nnl'%MList[mm])
 		ax1.plot(DAlphaList,Dlin01[:,mm],'k',lw=2,ls='--',
 		                                label=r'M=%.2d lin 0 deg'%MList[mm])
 		ax1.plot(DAlphaList,Dlin02[:,mm],'b',lw=2,ls=':',
 		                               label=r'M=%.2d lin 10 deg'%MList[mm])
-		ax1.plot(DAlphaList,Dnnl[:,mm],'r',lw=Nm-mm,
-		                                      label=r'M=%.2d nnl'%MList[mm])
 		#
+		ax2.plot(DAlphaList,Lnnl[:,mm],'r',lw=2,
+		                                      label=r'M=%.2d nnl'%MList[mm])
 		ax2.plot(DAlphaList,Llin01[:,mm],'k',lw=2,ls='--',
 		                                label=r'M=%.2d lin 0 deg'%MList[mm])
 		ax2.plot(DAlphaList,Llin02[:,mm],'b',lw=Nm-mm,ls=':',
 		                               label=r'M=%.2d lin 10 deg'%MList[mm])
-		ax2.plot(DAlphaList,Lnnl[:,mm],'r',lw=2,
-		                                      label=r'M=%.2d nnl'%MList[mm])
 
 		ax1.set_xlabel(r'\alpha [deg]')
 		ax1.set_title(r'Drag')
@@ -374,7 +362,20 @@ class Test_linsta(unittest.TestCase):
 		ax2.set_xlabel(r'\alpha [deg]')
 		ax2.set_title(r'Lift')
 		ax2.legend()
-		plt.show()
+
+
+		fig1 = plt.figure('Relative error lift',(12,4))
+		ax1=fig1.add_subplot(111)
+		ax1.plot(DAlphaList,Llin01[:,mm]/Lnnl[:,mm]-1.,'k',lw=2,ls='--',
+		                                      label=r'M=%.2d lin 0 deg'%MList[mm])
+		ax1.plot(DAlphaList,Llin02[:,mm]/Lnnl[:,mm]-1.,'b',lw=2,ls=':',
+		                                     label=r'M=%.2d lin 10 deg'%MList[mm])
+		ax1.set_xlabel(r'$\alpha$ [deg]')
+		ax1.set_ylabel(r'relative error')
+		ax1.set_title(r'Lift error w.r.t. exact solution')
+		ax1.legend()
+		ax2.legend()
+
 
 		if self.SHOW_PLOT: plt.show()
 		else: plt.close()
@@ -411,18 +412,24 @@ class Test_linsta(unittest.TestCase):
 		FZlin02,FXlin02=np.zeros((Na,Nm)),np.zeros((Na,Nm))
 		FZnnl,FXnnl=np.zeros((Na,Nm)),np.zeros((Na,Nm))
 
-		# Reference input:
+		Llin01,Dlin01=np.zeros((Na,Nm)),np.zeros((Na,Nm))
+		Llin02,Dlin02=np.zeros((Na,Nm)),np.zeros((Na,Nm))
+		Lnnl,Dnnl=np.zeros((Na,Nm)),np.zeros((Na,Nm))		
+
+		### Reference input:
+		#Mcamb,Pcamb=10,4
+		Mcamb,Pcamb=0,4
 		Mw=2
 		M=MList[mm]
 		chord=3.
 		b=0.5*chord
 		Uinf0=np.array([20.,0.])
 		rho=1.225
-		alpha0=4.0*np.pi/180. # angle of reference aerofoil w.r.t. horizontal line
+		alpha0=0.0*np.pi/180. # angle of reference aerofoil w.r.t. horizontal line
 
 		# reference condition 1/2: aerofoil at 0 deg angle
 		S01=uvlm.solver(M,Mw,b,Uinf0,alpha0,rho=1.225)
-		S01.build_camber_plate(Mcamb=10,Pcamb=4)
+		S01.build_camber_plate(Mcamb=Mcamb,Pcamb=Pcamb)
 		S02=copy.deepcopy(S01)
 
 		alpha_eff01=0.*np.pi/180.
@@ -430,13 +437,14 @@ class Test_linsta(unittest.TestCase):
 		Uinf_here=geo.rotate_speed(Uinf0,alpha_inf)
 		S01.Wzeta[:,:]=Uinf_here-Uinf0
 		S01.solve_static_Gamma2d()
+		Fref01=np.sum(S01.Faero,0)		
 
 		alpha_eff02=10.*np.pi/180.
 		alpha_inf=alpha_eff02-alpha0
 		Uinf_here=geo.rotate_speed(Uinf0,alpha_inf)
 		S02.Wzeta[:,:]=Uinf_here-Uinf0
 		S02.solve_static_Gamma2d()
-
+		Fref02=np.sum(S02.Faero,0)
 
 		print('Testing steady aerofoil for M=%d...' %M)
 
@@ -449,47 +457,56 @@ class Test_linsta(unittest.TestCase):
 			qinf_tot=0.5*rho*(S01.Uabs)**2
 			print('\tAlpha effective=%.2f deg' %DAlphaList[aa])
 
+			# Rotation matrix to project in wind axes
+			ca,sa=np.cos(alpha_inf),np.sin(alpha_inf)
+			R=np.array([ [ca,-sa], [sa,ca] ]).T
+
 			### Reference nonlinear solution
 			Sref=uvlm.solver(M,Mw,b,Uinf0,alpha0,rho)
-			Sref.build_camber_plate(Mcamb=10,Pcamb=4)
+			Sref.build_camber_plate(Mcamb=Mcamb,Pcamb=Pcamb)
 			Sref.Wzeta[:,:]=Uinf_here-Uinf0
 			Sref.solve_static_Gamma2d()
-			FXnnl[aa,mm],FZnnl[aa,mm]=np.sum(Sref.FmatSta,0)
+			FXnnl[aa,mm],FZnnl[aa,mm]=np.sum(Sref.Faero,0)
+			Dnnl[aa,mm],Lnnl[aa,mm]=np.dot(R,[FXnnl[aa,mm],FZnnl[aa,mm]])
 
 			### Linearised solution 01:
 			Slin01=linuvlm.solver(S01)
 			Slin01.Wzeta[:,:]=Uinf_here-(S01.Uzeta[0,:]+S01.Wzeta[0,:])
 			Slin01.solve_static_Gamma2d()
-			FXlin01[aa,mm],FZlin01[aa,mm]=np.sum(Slin01.FmatSta,0)
+			dFtot01=np.sum(Slin01.Faero,0)
+			FXlin01[aa,mm],FZlin01[aa,mm]=dFtot01+Fref01
+			Dlin01[aa,mm],Llin01[aa,mm]=np.dot(R,[FXlin01[aa,mm],FZlin01[aa,mm]])
 
 			### Linearised solution 02:
 			Slin02=linuvlm.solver(S02)
 			Slin02.Wzeta[:,:]=Uinf_here-(S02.Uzeta[0,:]+S02.Wzeta[0,:])
 			Slin02.solve_static_Gamma2d()
-			FXlin02[aa,mm],FZlin02[aa,mm]=np.sum(Slin02.FmatSta,0)
+			dFtot02=np.sum(Slin02.Faero,0)
+			FXlin02[aa,mm],FZlin02[aa,mm]=dFtot02+Fref02
+			Dlin02[aa,mm],Llin02[aa,mm]=np.dot(R,[FXlin02[aa,mm],FZlin02[aa,mm]])
 
 
 		clist=['k','r','b','0.6',]
 		### Aerodynamic forces
-		fig1 = plt.figure('Drag',(12,4))
-		fig2 = plt.figure('Lift',(12,4))
+		fig1 = plt.figure('FX',(12,4))
+		fig2 = plt.figure('FZ',(12,4))
 		ax1=fig1.add_subplot(111)
 		ax2=fig2.add_subplot(111)
-
+		#
+		ax1.plot(DAlphaList,FXnnl[:,mm],'r',lw=Nm-mm,
+		                                      label=r'M=%.2d nnl'%MList[mm])
 		ax1.plot(DAlphaList,FXlin01[:,mm],'k',lw=2,ls='--',
 		                                label=r'M=%.2d lin 0 deg'%MList[mm])
 		ax1.plot(DAlphaList,FXlin02[:,mm],'b',lw=2,ls=':',
 		                               label=r'M=%.2d lin 10 deg'%MList[mm])
-		ax1.plot(DAlphaList,FXnnl[:,mm],'r',lw=Nm-mm,
-		                                      label=r'M=%.2d nnl'%MList[mm])
 		#
+		ax2.plot(DAlphaList,FZnnl[:,mm],'r',lw=2,
+		                                      label=r'M=%.2d nnl'%MList[mm])
 		ax2.plot(DAlphaList,FZlin01[:,mm],'k',lw=2,ls='--',
 		                                label=r'M=%.2d lin 0 deg'%MList[mm])
 		ax2.plot(DAlphaList,FZlin02[:,mm],'b',lw=Nm-mm,ls=':',
 		                               label=r'M=%.2d lin 10 deg'%MList[mm])
-		ax2.plot(DAlphaList,FZnnl[:,mm],'r',lw=2,
-		                                      label=r'M=%.2d nnl'%MList[mm])
-
+		#
 		ax1.set_xlabel(r'\alpha [deg]')
 		ax1.set_title(r'Horizontal Force [N]')
 		ax1.legend()
@@ -497,9 +514,62 @@ class Test_linsta(unittest.TestCase):
 		ax2.set_title(r'Vertical Force [N]')
 		ax2.legend()
 
+		fig1 = plt.figure('Relative error Fz',(12,4))
+		ax1=fig1.add_subplot(111)
+		ax1.plot(DAlphaList,np.abs(FZlin01[:,mm]/FZnnl[:,mm]-1.),'k',lw=2,ls='--',
+		                                    label=r'M=%.2d lin 0 deg'%MList[mm])
+		ax1.plot(DAlphaList,np.abs(FZlin02[:,mm]/FZnnl[:,mm]-1.),'b',lw=2,ls=':',
+		                                   label=r'M=%.2d lin 10 deg'%MList[mm])
+		ax1.set_xlabel(r'$\alpha$ [deg]')
+		ax1.set_ylabel(r'relative error')
+		ax1.set_title(r'Fz error w.r.t. exact solution')
+		ax1.legend()
+
+		fig2 = plt.figure('Relative error Fx',(12,4))
+		ax2=fig2.add_subplot(111)
+		ax2.plot(DAlphaList,np.abs(FXlin01[:,mm]/FXnnl[:,mm]-1.),'k',lw=2,ls='--',
+		                                    label=r'M=%.2d lin 0 deg'%MList[mm])
+		ax2.plot(DAlphaList,np.abs(FXlin02[:,mm]/FXnnl[:,mm]-1.),'b',lw=2,ls=':',
+		                                   label=r'M=%.2d lin 10 deg'%MList[mm])
+		ax2.set_xlabel(r'$\alpha$ [deg]')
+		ax2.set_ylabel(r'relative error')
+		ax2.set_ylim(.0,3.)
+		ax2.set_title(r'Fx error w.r.t. exact solution')
+		ax2.legend()
+
+
+
+		### Aerodynamic forces in wind axes
+		fig1 = plt.figure('Drag',(12,4))
+		fig2 = plt.figure('Lift',(12,4))
+		ax1=fig1.add_subplot(111)
+		ax2=fig2.add_subplot(111)
+		#
+		ax1.plot(DAlphaList,Dnnl[:,mm],'r',lw=Nm-mm,
+		                                      label=r'M=%.2d nnl'%MList[mm])
+		ax1.plot(DAlphaList,Dlin01[:,mm],'k',lw=2,ls='--',
+		                                label=r'M=%.2d lin 0 deg'%MList[mm])
+		ax1.plot(DAlphaList,Dlin02[:,mm],'b',lw=2,ls=':',
+		                               label=r'M=%.2d lin 10 deg'%MList[mm])
+		#
+		ax2.plot(DAlphaList,Lnnl[:,mm],'r',lw=2,
+		                                      label=r'M=%.2d nnl'%MList[mm])
+		ax2.plot(DAlphaList,Llin01[:,mm],'k',lw=2,ls='--',
+		                                label=r'M=%.2d lin 0 deg'%MList[mm])
+		ax2.plot(DAlphaList,Llin02[:,mm],'b',lw=Nm-mm,ls=':',
+		                               label=r'M=%.2d lin 10 deg'%MList[mm])
+		#
+		ax1.set_xlabel(r'\alpha [deg]')
+		ax1.set_title(r'Drag Force [N]')
+		ax1.legend()
+		ax2.set_xlabel(r'\alpha [deg]')
+		ax2.set_title(r'Lift Force [N]')
+		ax2.legend()
+
 		if self.SHOW_PLOT: plt.show()
 		else: plt.close()
 
+		embed()
 
 
 	def test_camber_aerofoil_speed(self):
@@ -551,12 +621,14 @@ class Test_linsta(unittest.TestCase):
 		Uinf_here=geo.rotate_speed(Uinf0,alpha_inf)
 		S01.dZetadt[:,:]=-(Uinf_here-Uinf0)
 		S01.solve_static_Gamma2d()
+		Fref01=np.sum(S01.Faero,0)	
 
 		alpha_eff02=10.*np.pi/180.
 		alpha_inf=alpha_eff02-alpha0
 		Uinf_here=geo.rotate_speed(Uinf0,alpha_inf)
 		S02.dZetadt[:,:]=-(Uinf_here-Uinf0)
 		S02.solve_static_Gamma2d()
+		Fref02=np.sum(S02.Faero,0)
 
 
 		print('Testing steady aerofoil for M=%d...' %M)
@@ -575,19 +647,22 @@ class Test_linsta(unittest.TestCase):
 			Sref.build_camber_plate(Mcamb=10,Pcamb=4)
 			Sref.Wzeta[:,:]=Uinf_here-Uinf0
 			Sref.solve_static_Gamma2d()
-			FXnnl[aa,mm],FZnnl[aa,mm]=np.sum(Sref.FmatSta,0)
+			FXnnl[aa,mm],FZnnl[aa,mm]=np.sum(Sref.Faero,0)
 
 			### Linearised solution 01:
 			Slin01=linuvlm.solver(S01)
 			Slin01.dZetadt[:,:]=-(Uinf_here-(S01.Uzeta[0,:]-S01.dZetadt[0,:]))
 			Slin01.solve_static_Gamma2d()
-			FXlin01[aa,mm],FZlin01[aa,mm]=np.sum(Slin01.FmatSta,0)
+			dFtot01=np.sum(Slin01.Faero,0)
+			FXlin01[aa,mm],FZlin01[aa,mm]=dFtot01+Fref01
 
 			### Linearised solution 02:
 			Slin02=linuvlm.solver(S02)
 			Slin02.dZetadt[:,:]=-(Uinf_here-(S02.Uzeta[0,:]-S02.dZetadt[0,:]))
 			Slin02.solve_static_Gamma2d()
-			FXlin02[aa,mm],FZlin02[aa,mm]=np.sum(Slin02.FmatSta,0)
+			FXlin02[aa,mm],FZlin02[aa,mm]=np.sum(Slin02.Faero,0)
+			dFtot02=np.sum(Slin02.Faero,0)
+			FXlin02[aa,mm],FZlin02[aa,mm]=dFtot02+Fref02
 
 
 		clist=['k','r','b','0.6',]
@@ -622,31 +697,6 @@ class Test_linsta(unittest.TestCase):
 		else: plt.close()
 
 
-	# def get_wvec(self,aeff,a0,ux,uz):
-
-	# 	# get free stream angle
-	# 	a=aeff-a0
-	# 	tga=np.tan(a)
-
-	# 	### build residual
-	# 	def Fres(x):
-	# 		'''@warning: uses function variables!'''
-	# 		wx,wz=x
-	# 		F=np.zeros((2,))
-	# 		F[0]=tga*(ux+wx)-(uz+wz)
-	# 		F[1]=wx**2+2.*wx*ux+wz**2+2.*uz*wz
-	# 		return F
-
-	# 	# solve nnl equations
-	# 	x0=np.zeros((2,))
-	# 	wvec=scopt.newton_krylov(Fres,x0)
-
-	# 	asol=np.tan((uz+wvec[1])/(ux+wvec[0]))
-	# 	assert (asol-(aeff-a0))**2<1e-3, 'Solution not found!'
-
-	# 	return wvec
-
-
 if __name__=='__main__':
 
 
@@ -667,7 +717,7 @@ if __name__=='__main__':
 	#T.test_camber_external_speed()
 
 	## Cambered aerofoil - aerofoil speed
-	T.test_camber_aerofoil_speed()
+	#T.test_camber_aerofoil_speed()
 
 	### run all
 	#unittest.main()

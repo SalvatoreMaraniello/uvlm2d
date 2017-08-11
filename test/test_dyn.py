@@ -143,10 +143,16 @@ class Test_dyn(unittest.TestCase):
 		f0=2.#Hz
 		w0=2.*np.pi*f0 #rad/s
 
-		for case in ['low','medium-high','high']:
+		for case in ['debug','low','medium-high','high']:
 
 			print('Testing aerofoil in plunge motion at %s frequency...' %case)
 
+			if case is 'debug':
+				ktarget=0.1
+				H=0.02*b
+				Ncycles=5.
+				WakeFact=5
+				M=4
 			if case is 'low':
 				ktarget=0.1
 				H=0.2*b
@@ -249,6 +255,8 @@ class Test_dyn(unittest.TestCase):
 			if self.SHOW_PLOT: plt.show()
 			else: plt.close()
 
+			embed()
+
 			### Error in last cycle
 			ttvec=S.time>float(Ncycles-1)/Ncycles*S.T
 			ErCL=np.abs(THCF[ttvec,1]-CLtot_an[ttvec])/np.max(CLtot_an[ttvec])
@@ -261,6 +269,10 @@ class Test_dyn(unittest.TestCase):
 			ErCDmax=np.max(ErCD)
 
 			# Set tolerance and compare vs. expect results at low refinement
+			if case is 'debug':
+				tolCD,tolCL=2.5e3,1.5e3
+				ErCLnumExp=1e5
+				ErCDnumExp=1e5
 			if case is 'low':
 				tolCD,tolCL=2.5e-2,1.5e-2
 				ErCLnumExp=0.011439946048750907
@@ -343,6 +355,15 @@ class Test_dyn(unittest.TestCase):
 		# ax.legend()
 		# plt.show()
 
+		# Fcirc=S.THFaero-S.THFaero_m
+		# fig = plt.figure('Lift contributions',(10,6))
+		# ax=fig.add_subplot(111)
+		# ax.plot(S.time,S.THFaero_m[:,1],'k',label=r'added mass')
+		# ax.plot(S.time,Fcirc[:,1],'r',label=r'circulatory')
+		# ax.set_xlabel('time [s]')
+		# ax.set_ylabel('force [N]')
+		# ax.legend()
+		# plt.show()
 
 
 	def test_sin_gust(self):
