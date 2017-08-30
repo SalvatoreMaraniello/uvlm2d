@@ -23,8 +23,11 @@ def plunge(S,f0,H):
 	Set aerofoil plunge motion of frequency f0 (Hz) and amplitude H such that:
 		Zeta[ii,1](t) = Zeta[ii,1](t=0) + H*[1-cos(2*pi*f0*t)]
 	which is as per Ref.1, except for the constant term.
+	The motion is superimposed to any pre-existing motion time history stored
+	in the attributes THZeta and THdZetadt.
+
 	@note: the method will update the vertical coordinate of the aerofoil t each
-	time-step
+	time-step.
 
 	@warning: the initial shape of the wake is flat. To improve convergence
 	an initial sinusoidal wake should be assumed
@@ -33,15 +36,14 @@ def plunge(S,f0,H):
 	# def. position
 	S.THZeta[0,:,:]=S.Zeta
 	for tt in range(1,S.NT):
-		S.THZeta[tt,:,0]=S.Zeta[:,0]
-		S.THZeta[tt,:,1]=S.Zeta[:,1]+H*(1.-np.cos(2.*np.pi*f0*S.time[tt]))
+		S.THZeta[tt,:,1]+=H*(1.-np.cos(2.*np.pi*f0*S.time[tt]))
 	# def. velocity at t=0
 	S.dZetadt[:,1]=0.0
 
 	### Linear model case:
 	if hasattr(S,'THdZetadt'):
 		for tt in range(S.NT):
-			S.THdZetadt[tt,:,1]=H*2.*np.pi*f0*np.sin(2.*np.pi*f0*S.time[tt])
+			S.THdZetadt[tt,:,1]+=H*2.*np.pi*f0*np.sin(2.*np.pi*f0*S.time[tt])
 
 	### sinusoidal version
 	### Zeta[ii,1](t) = Zeta[ii,1](t=0) + H*sin(2*pi*f0*t)
@@ -56,7 +58,6 @@ def plunge(S,f0,H):
 	### @todo: def wake initial shape
 
 	return S
-
 
 
 

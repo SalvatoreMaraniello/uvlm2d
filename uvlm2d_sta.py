@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from IPython import embed
 import save
 import geo
+import time
 
 
 class solver():
@@ -85,7 +86,6 @@ class solver():
 		self.AA=np.zeros((Ndim,self.M,self.M))
 		self.AAWW=np.zeros((Ndim,self.M,self.Mw))
 
-
 		# settings
 		self.PROCESSORS=4
 		self.parallel=False#True
@@ -101,6 +101,7 @@ class solver():
 		self.SolSta.Input=save.Output('input')
 		self.SolSta.State=save.Output('state')
 		self.SolSta.Output=save.Output('output')
+
 
 	def build_flat_plate(self):
 		''' 
@@ -517,6 +518,9 @@ class solver():
 		Solves for the vorticity at each vortex line, Gamma.
 		@warning: the method assumes that the geometry has already been built.
 		'''
+		t0=time.time()
+		print('Nonlinear solve_static_Gamma started...')
+
 		Ndim=2
 
 		K,Kw=self.K,self.Kw
@@ -602,6 +606,9 @@ class solver():
 			self.SolSta.Output.drop(Faero=self.Faero)
 
 			save.h5file(self._savedir,self._savename, *(self.SolSta,) )
+
+		tend=time.time()-t0
+		print('\tDone in %.2f sec!' %tend)
 
 
 	def get_induced_velocity(self):

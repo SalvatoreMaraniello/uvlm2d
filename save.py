@@ -59,7 +59,7 @@ def add_class_as_grp(obj,grpParent,compress=False):
 
     for attr in dictname:
         value=getattr(obj,attr)
-        if value != None:
+        if value is not None:
             # Add Output class as subgroup
             if isinstance(value,Output):
                 add_class_as_grp(value,grp,compress=compress)
@@ -112,7 +112,7 @@ def all_class(obj,filename):
     for attr in dict:
         value=getattr(obj,attr)
         # check is not empty...
-        if value != None:  
+        if value is not None:  
             if type(value).__name__[:2]=='c_':
                 print('%s is a ctype:'%attr)
                 value=value.value

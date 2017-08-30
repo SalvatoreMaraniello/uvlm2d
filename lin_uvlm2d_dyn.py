@@ -14,6 +14,7 @@ Ref.[3]: Katz and Plotkin, Low speed aerodynamics
 import scipy as sc
 import scipy.linalg as scalg
 import scipy.signal as scsig
+import scipy.sparse as sparse
 import numpy as np
 import multiprocessing as mpr
 import matplotlib.pyplot as plt
@@ -70,7 +71,7 @@ class solver(lin_uvlm2d_sta.solver):
 		self.THZeta=np.zeros((self.NT,K,Ndim))    # aerofoil pos.
 		self.THdZetadt=np.zeros((self.NT,K,Ndim)) # aerofoil vel.
 		self.THWzeta=np.zeros((self.NT,K,Ndim))   # gust over aerofoil
-		###self.THWzetaW=np.zeros((self.NT,self.Kw,Ndim))# gust over wake - not in linear eq.s
+		###self.THWzetaW=np.zeros((self.NT,self.Kw,Ndim))# unecessary-frozen wake
 
 		# Output
 		self.THFaero=np.zeros((self.NT,Ndim))		  # total aerodynamic force
@@ -92,6 +93,8 @@ class solver(lin_uvlm2d_sta.solver):
 		self._saveout=True
 		self._savedir='./res/'
 		self._savename='dummy_lindyn.h5'
+		self._print=True
+		self._sparseSS=True # produces SS system with sparse matrices
 
 		# Prepare Input/Output classes
 		self.SolDyn=save.Output('sollindyn')
@@ -163,14 +166,6 @@ class solver(lin_uvlm2d_sta.solver):
 		Fjouk=np.zeros((M,Ndim))  # at segments (grid in 2D)
 		Fmass=np.zeros((M,Ndim))  # at collocation points
 
-		### define constant matrices
-		# convection wake intensity
-		Cgamma,CgammaW=self.get_Cgamma_matrices()
-		# convection wake coordinates
-		Czeta,CzetaW=self.get_Czeta_matrices()
-		# force interpolation
-		Iseg,Icoll=S0.get_force_matrices()
-
 
 		### steady solution
 		# This will update things only if the input of the linear static model
@@ -207,15 +202,139 @@ class solver(lin_uvlm2d_sta.solver):
 		self.THFaero[0,:]=self.Faero.sum(0)		
 		self.THFdistr[0,:,:]=self.Faero.copy()
 
-		self.Xnew=[]
+		### State space system
+		Ass,Bss,Css_j,Dss_j,Css_m,Dss_m=self.build_ss()
 
-		##### State space system:
-		# coordinates reshaped in Fortran order, with first index changing 
-		# faster. In the reshaped array, the first K dof are the x component.
-		# @warning: order of input u different from Ref.[2]
+		# define update methods
+		if self._sparseSS:
+			def get_xnew(Ass,Bss,xold,unew):
+				return  Ass.dot(xold)+Bss.dot(unew)
+			def get_ynew(Css_m,Dss_m,Css_j,Dss_j,xnew,unew):
+				ynew=Css_m.dot(xnew)+Dss_m.dot(unew)
+				Faero_m=ynew.reshape((K,2),order='F')
+				ynew=ynew+Css_j.dot(xnew)+Dss_j.dot(unew)
+				Faero=ynew.reshape((K,2),order='F')
+				return ynew,Faero_m,Faero	
+		else:
+			def get_xnew(Ass,Bss,xold,unew):
+				return np.dot(Ass,xold)+np.dot(Bss,unew)
+			def get_ynew(Css_m,Dss_m,Css_j,Dss_j,xnew,unew):
+				ynew=np.dot(Css_m,xnew)+np.dot(Dss_m,unew)
+				Faero_m=ynew.reshape((K,2),order='F')
+				ynew=ynew+np.dot(Css_j,xnew)+np.dot(Dss_j,unew)
+				Faero=ynew.reshape((K,2),order='F')
+				return ynew,Faero_m,Faero
+
+
+		print('Time-stepping started...')
+		t0=time.time()
+		### Time-stepping
+		xold=np.concatenate( (self.Gamma,self.GammaW,self.dGammadt) )
+
+		for tt in range(1,NT):
+			if self._print:
+				print('step: %.6d of %.6d'%(tt+1,NT))
+
+			# define new input
+			unew=np.concatenate((
+				self.THZeta[tt,:,:].reshape((2*K,),order='F'),
+						self.THdZetadt[tt,:,:].reshape((2*K,),order='F'),
+								self.THWzeta[tt,:,:].reshape((2*K,),order='F')))
+
+			# get new state
+			#xnew=np.dot(Ass,xold)+np.dot(Bss,unew)
+			xnew=get_xnew(Ass,Bss,xold,unew)
+			xold=xnew
+
+			# store state
+			self.THGamma[tt,:]=xnew[:M]
+			self.THGammaW[tt,:]=xnew[M:M+Mw]
+			self.THdGammadt[tt,:]=xnew[M+Mw:]
+			#embed()
+
+			# # Produce gamma
+			self.THgamma[tt,:]=np.dot(S0._TgG,self.THGamma[tt,:])
+			self.THgammaW[tt,:]=np.dot(S0._TgG_w,self.THGammaW[tt,:])\
+											 +np.dot(S0._EgG,self.THGamma[tt,:])
+
+			### Linearised output
+			# ynew=np.dot(Css_m,xnew)+np.dot(Dss_m,unew)
+			# Faero_m=ynew.reshape((K,2),order='F')
+			# ynew=ynew+np.dot(Css_j,xnew)+np.dot(Dss_j,unew)
+			# Faero=ynew.reshape((K,2),order='F')
+			ynew,Faero_m,Faero=get_ynew(Css_m,Dss_m,Css_j,Dss_j,xnew,unew)
+
+			# store output
+			self.THFaero[tt,:]=Faero.sum(0)
+			self.THFaero_m[tt,:]=Faero_m.sum(0)
+			self.THFdistr[tt,:,:]=Faero
+			#self.THVtot_zeta[tt,:,:]=self.Vtot_zeta
+
+		tend=time.time()-t0
+		print('\tDone in %.2f sec!' %tend)
+
+		# terminate
+		self._exec_time=time.time()-start_time
+		print('Dynamic solution done in %.1f sec!' % self._exec_time)
+
+		# dimensionalise
+		self.dimvars()
+		S0.dimvars()
+
+		# save:
+		if self._saveout:
+
+			# Prepare Input/Output classes
+			self.SolDyn=save.Output('sollindyn')
+			self.SolDyn.Param=save.Output('params')
+			self.SolDyn.Param.drop(dt=self.dt,T=self.T,time=self.time,
+										      NT=self.NT,eps_Hall=self.eps_Hall)
+			self.SolDyn.Input=save.Output('input')
+			self.SolDyn.Input.drop(THZeta=self.THZeta,
+				                  THdZetadt=self.THdZetadt,THWzeta=self.THWzeta)
+			self.SolDyn.State=save.Output('state')
+			self.SolDyn.State.drop(THGamma=self.THGamma,THGammaW=self.THGammaW,
+				                                     THdGammadt=self.THdGammadt)
+			self.SolDyn.Output=save.Output('output')
+			self.SolDyn.Output.drop(THFaero=self.THFaero,
+				                THFaero_m=self.THFaero_m,THFdistr=self.THFdistr)
+
+			save.h5file(self._savedir,self._savename, *(S0.SolSta,self.SolDyn,))
+
+
+	def build_ss(self,AllMats=False):
+		'''
+		Build state-space matrices in the form
+			E x^{n+1} = F x^n + G u^{n+1}
+			y^{n+1} = C x^{n+1} + D u^{n+1}
+
+		@note: the E,F,G,C,D matrices are built starting from full matrices. The
+		allocation of tensors (in lin_uvlm2d_sta module) is expensive but not
+		because sparsity is not exploited. Rather, this is due to the foor loops
+		over multi-dimensional arrays and non-contiguous elements of the array.
+		The conversion to sparse matrix, however:
+			1. is fast, hence no need to define matrices directly as sparse
+			2. allows faster time-stepping
+			3. reduces memory usage.
+		'''
+
+		t0=time.time()
+		print('build_ss started...')
+
+		S0=self.S0
+		M,Mw=S0.M,S0.Mw
+		K,Kw=S0.K,S0.Kw
 
 		Nx=2*M+Mw
 		Nu=6*K
+
+		### define constant matrices
+		# convection wake intensity
+		Cgamma,CgammaW=self.get_Cgamma_matrices()
+		## convection wake coordinates
+		#Czeta,CzetaW=self.get_Czeta_matrices()
+		# force interpolation
+		Iseg,Icoll=S0.get_force_matrices()
 
 		### State Matrices
 		Ess,Fss=np.zeros((Nx,Nx)),np.zeros((Nx,Nx))
@@ -242,10 +361,15 @@ class solver(lin_uvlm2d_sta.solver):
 		Gss[:M,4*K:6*K]=-W0
 
 		### State space description
-		LU,P=scalg.lu_factor(Ess)
-		Ass=scalg.lu_solve( (LU,P), Fss)
-		Bss=scalg.lu_solve( (LU,P), Gss)
-
+		if self._sparseSS:
+			E=sparse.bsr_matrix(Ess)
+			invE=sparse.linalg.splu(E)
+			Ass=invE.solve(Fss)
+			Bss=invE.solve(Gss)
+		else:
+			LU,P=scalg.lu_factor(Ess)
+			Ass=scalg.lu_solve( (LU,P), Fss)
+			Bss=scalg.lu_solve( (LU,P), Gss)
 
 		### Output matrices - To be completed
 		Ny=2*K
@@ -288,80 +412,24 @@ class solver(lin_uvlm2d_sta.solver):
 		Dss_m[K:,:K]=np.dot(Icoll,DFm_dZeta[1,:,0,:]) # force y w.r.t. x displ.
 		Dss_m[K:,K:2*K]=np.dot(Icoll,DFm_dZeta[1,:,1,:]) # force y w.r.t. y displ.
 
-		#embed()
-
-		### Time-stepping
-		xold=np.concatenate( (self.Gamma,self.GammaW,self.dGammadt) )
-
-		for tt in range(1,NT):
-			print('step: %.6d of %.6d'%(tt+1,NT))
-
-			# define new input
-			unew=np.concatenate((
-				self.THZeta[tt,:,:].reshape((2*K,),order='F'),
-						self.THdZetadt[tt,:,:].reshape((2*K,),order='F'),
-								self.THWzeta[tt,:,:].reshape((2*K,),order='F')))
-
-			# get new state
-			xnew=np.dot(Ass,xold)+np.dot(Bss,unew)
-			# xnew_test=np.linalg.solve(Ess,np.dot(Fss,xold))+\
-			# 							   np.linalg.solve(Ess,np.dot(Gss,unew))
-			#gnew=np.dot(Ass1,xold)+np.dot(Bss1,unew)
-			#if tt<4: embed()
-			xold = xnew.copy()
-			#self.Xnew.append(xnew.copy())
-
-			# store state
-			self.THGamma[tt,:]=xnew[:M]
-			self.THGammaW[tt,:]=xnew[M:M+Mw]
-			self.THdGammadt[tt,:]=xnew[M+Mw:]
+		# convert to sparse
+		if self._sparseSS:
+			Ass=sparse.bsr_matrix(Ass)
+			Bss=sparse.bsr_matrix(Bss)
+			Css_m=sparse.bsr_matrix(Css_m)
+			Css_j=sparse.bsr_matrix(Css_j) # full matrix but BSR not penalising
+			Dss_m=sparse.bsr_matrix(Dss_m)
+			Dss_j=sparse.bsr_matrix(Dss_j)
 			#embed()
 
-			# # Produce gamma
-			self.THgamma[tt,:]=np.dot(S0._TgG,self.THGamma[tt,:])
-			self.THgammaW[tt,:]=np.dot(S0._TgG_w,self.THGammaW[tt,:])\
-											 +np.dot(S0._EgG,self.THGamma[tt,:])
+		if AllMats: outs=(Ass,Bss,Css_j,Dss_j,Css_m,Dss_m,Ess,Fss,Gss)
+		else: outs=(Ass,Bss,Css_j,Dss_j,Css_m,Dss_m)
 
-			### Linearised output
-			ynew=np.dot(Css_m,xnew)+np.dot(Dss_m,unew)
-			Faero_m=ynew.reshape((K,2),order='F')
-			ynew=ynew+np.dot(Css_j,xnew)+np.dot(Dss_j,unew)
-			Faero=ynew.reshape((K,2),order='F')
-			### Linearised output
+		tend=time.time()-t0
+		print('\tDone in %.2f sec!' %tend)
 
-			# store output
-			self.THFaero[tt,:]=Faero.sum(0)
-			self.THFaero_m[tt,:]=Faero_m.sum(0)
-			self.THFdistr[tt,:,:]=Faero
-			#self.THVtot_zeta[tt,:,:]=self.Vtot_zeta
+		return outs
 
-		# terminate
-		self._exec_time=time.time()-start_time
-		print('Done in %.1f sec!' % self._exec_time)
-
-		# dimensionalise
-		self.dimvars()
-		S0.dimvars()
-
-		# save:
-		if self._saveout:
-
-			# Prepare Input/Output classes
-			self.SolDyn=save.Output('sollindyn')
-			self.SolDyn.Param=save.Output('params')
-			self.SolDyn.Param.drop(dt=self.dt,T=self.T,time=self.time,
-										      NT=self.NT,eps_Hall=self.eps_Hall)
-			self.SolDyn.Input=save.Output('input')
-			self.SolDyn.Input.drop(THZeta=self.THZeta,
-				                  THdZetadt=self.THdZetadt,THWzeta=self.THWzeta)
-			self.SolDyn.State=save.Output('state')
-			self.SolDyn.State.drop(THGamma=self.THGamma,THGammaW=self.THGammaW,
-				                                     THdGammadt=self.THdGammadt)
-			self.SolDyn.Output=save.Output('output')
-			self.SolDyn.Output.drop(THFaero=self.THFaero,
-				                THFaero_m=self.THFaero_m,THFdistr=self.THFdistr)
-
-			save.h5file(self._savedir,self._savename, *(S0.SolSta,self.SolDyn,))
 
 
 	def der_Fmass_dZeta(self):
@@ -527,7 +595,7 @@ if __name__=='__main__':
 	import pp_uvlm2d as pp
 
 	### build reference state
-	Mw=4
+	Mw=8
 	M=3
 	alpha=2.*np.pi/180.
 	ainf=2.0*np.pi/180.
@@ -537,7 +605,7 @@ if __name__=='__main__':
 
 	# static exact solution
 	S0=uvlm2d_sta.solver(M,Mw,b,Uinf,alpha,rho=1.225)
-	S0.build_camber_plate(Mcamb=10,Pcamb=4)
+	S0.build_camber_plate(Mcamb=30,Pcamb=4)
 	S0.solve_static_Gamma2d()
 
 	# linearise dynamic

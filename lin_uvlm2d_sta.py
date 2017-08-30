@@ -9,6 +9,9 @@ aerodynamics with arbitrary kinematics"
 Ref.[1]: Anderson, Fundamentals of Aerodynamics
 Ref.[2]: Simpson, Palacios and Maraniello, Scitech 2017
 Ref.[3]: Katz and Plotkin, Low speed aerodynamics
+
+@warning: methods to allocate tensors for linear systems are not optimised (for
+loops in python and induces non-contiguous).
 '''
 
 import scipy as sc
@@ -18,6 +21,7 @@ import multiprocessing as mpr
 import matplotlib.pyplot as plt
 from IPython import embed
 import save
+import time
 
 import uvlm2d_sta
 from uvlm2d_sta import biot_savart_2d
@@ -69,6 +73,9 @@ class solver():#uvlm2d_sta.solver):
 
 	def solve_static_Gamma2d(self):
 
+		t0=time.time()
+		print('Linear solve_static_Gamma started...')
+
 		Ndim=2
 		K,Kw=self.S0.K,self.S0.Kw
 		M,Mw=self.S0.M,self.S0.Mw	
@@ -83,7 +90,6 @@ class solver():#uvlm2d_sta.solver):
 		S0.nondimvars()
 
 		##### Delta velocity at collocation point 
-
 		### increment velocity (airspeed/aerofoil movement) contributions
 		self.Vcoll=np.dot(S0._Wcv,self.Wzeta-self.dZetadt)
 		dVcollperp_a=np.dot(S0._Wnc[0,:,:],self.Vcoll[:,0])+\
@@ -137,6 +143,10 @@ class solver():#uvlm2d_sta.solver):
 		# dimensionalise
 		self.dimvars()
 		S0.dimvars()
+		#embed()
+
+		tend=time.time()-t0
+		print('\tDone in %.2f sec!' %tend)
 
 
 	def get_total_induced_velocity(self):
@@ -264,16 +274,13 @@ class solver():#uvlm2d_sta.solver):
 							  zetaA=zeta_a, zetaB=zeta_b,zetaC=zeta_c,
 					                      nvec=nc,CF=cf,gamma=self.S0.Gamma[vv])
 				
-				try:
-					# allocate partial derivatives w.r.t. vv ring
-					Der[0,mm,map_here]=Der[0,mm,map_here]+DerLocal[0:2]
-					Der[1,mm,map_here]=Der[1,mm,map_here]+DerLocal[2:4]
+				# allocate partial derivatives w.r.t. vv ring
+				Der[0,mm,map_here]=Der[0,mm,map_here]+DerLocal[0:2]
+				Der[1,mm,map_here]=Der[1,mm,map_here]+DerLocal[2:4]
 
-					# allocate partial derivatives w.r.t. mm ring
-					Der[0,mm,map_cv]=Der[0,mm,map_cv]+DerLocal[4:6]
-					Der[1,mm,map_cv]=Der[1,mm,map_cv]+DerLocal[6:8]
-				except:
-					embed()
+				# allocate partial derivatives w.r.t. mm ring
+				Der[0,mm,map_cv]=Der[0,mm,map_cv]+DerLocal[4:6]
+				Der[1,mm,map_cv]=Der[1,mm,map_cv]+DerLocal[6:8]
 
 
 			# loop through wake vortex rings

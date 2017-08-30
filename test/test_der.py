@@ -216,6 +216,7 @@ class Test_der_sta(unittest.TestCase):
 		assert errW_max<tol,\
 			 'Wake maximum error %.2e larger than tolerance %.2e'%(errW_max,tol)
 
+		#embed()
 
 
 	def test_der_Fjouk_dZeta_vind_all(self):
@@ -303,7 +304,7 @@ class Test_der_sta(unittest.TestCase):
 		assert errG_max<tol,\
 			 'Wake maximum error %.2e larger than tolerance %.2e'%(errW_max,tol)
 
-
+		#embed()
 
 
 	def test_der_Fjouk_dV(self):
@@ -368,11 +369,10 @@ class Test_der_sta(unittest.TestCase):
 		# check maximum error
 		err_max,Eabs,Erel=max_error_tensor(Pder_an,Pder_num)
 
-		#embed()
 		tol=5.*FDstep
 		assert err_max<tol,\
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
-
+		#embed()
 
 
 	def test_der_Fjouk_dGamma_vtot0(self):
@@ -436,6 +436,7 @@ class Test_der_sta(unittest.TestCase):
 		tol=5.*FDstep
 		assert err_max<tol,\
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
+		#embed()
 
 
 	def test_der_Fjouk_dGamma_vind(self):
@@ -535,7 +536,7 @@ class Test_der_sta(unittest.TestCase):
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
 		assert errW_max<tol,\
 			 'Wake maximum error %.2e larger than tolerance %.2e'%(errW_max,tol)
-
+		#embed()
 
 
 class Test_der_dyn(unittest.TestCase):
@@ -631,8 +632,7 @@ class Test_der_dyn(unittest.TestCase):
 		tol=5.*FDstep
 		assert err_max<tol,\
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
-
-
+		#embed()
 
 
 	def test_der_Fmass_dGammadt(self):
@@ -696,15 +696,15 @@ class Test_der_dyn(unittest.TestCase):
 		tol=5.*FDstep
 		assert err_max<tol,\
 			       'Maximum error %.2e larger than tolerance %.2e'%(err_max,tol)
-
+		#embed()
 
 
 
 if __name__=='__main__':
 
 	### Static terms
-	T=Test_der_sta()
-	T.setUp()
+	#T=Test_der_sta()
+	#T.setUp()
 	unittest.main()
 
 	## Induced velocity
@@ -719,9 +719,9 @@ if __name__=='__main__':
 
 
 	### Dynamic terms
-	T=Test_der_dyn()
-	T.setUp()
-	unittest.main()
+	#T=Test_der_dyn()
+	#T.setUp()
+	#unittest.main()
 
 	# Added mass
 	#T.test_der_Fmass_dZeta()
